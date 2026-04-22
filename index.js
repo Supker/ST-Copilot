@@ -1495,25 +1495,27 @@
         container.innerHTML = '';
         const s = getSettings();
 
-        // Saved Themes Dropdown
+        if (!s.savedThemes || Object.keys(s.savedThemes).length === 0) {
+            s.savedThemes = { 'Default': { ...THEME_PRESETS.default } };
+            s.activeThemeProfile = 'Default';
+            s.customTheme = { ...s.savedThemes['Default'] };
+            saveSettings();
+        }
+
         const profileRow = document.createElement('div');
         profileRow.className = 'scp-profile-bar';
         profileRow.style.marginBottom = '12px';
         profileRow.innerHTML = `
-            <select id="scp-theme-profile-select">
-                <option value="">-- Unsaved Theme --</option>
-            </select>
-            <button class="scp-profile-icon-btn" id="scp-theme-save-new" title="Save current theme">
-                <i class="fa-solid fa-floppy-disk"></i>
-            </button>
-            <button class="scp-profile-icon-btn danger" id="scp-theme-delete" title="Delete selected theme">
-                <i class="fa-solid fa-trash"></i>
-            </button>
+            <select id="scp-theme-profile-select"></select>
+            <button class="scp-profile-icon-btn" id="scp-theme-save" title="Save current theme parameters"><i class="fa-solid fa-floppy-disk"></i></button>
+            <button class="scp-profile-icon-btn" id="scp-theme-create" title="Create new theme from preset"><i class="fa-solid fa-plus"></i></button>
+            <button class="scp-profile-icon-btn" id="scp-theme-rename" title="Rename selected theme"><i class="fa-solid fa-pen"></i></button>
+            <button class="scp-profile-icon-btn danger" id="scp-theme-delete" title="Delete selected theme"><i class="fa-solid fa-trash"></i></button>
         `;
         container.appendChild(profileRow);
 
         const sel = profileRow.querySelector('#scp-theme-profile-select');
-        for (const name of Object.keys(s.savedThemes || {})) {
+        for (const name of Object.keys(s.savedThemes)) {
             const opt = document.createElement('option');
             opt.value = name; opt.textContent = name;
             opt.selected = name === s.activeThemeProfile;
@@ -1529,22 +1531,46 @@
             }
         });
 
-        profileRow.querySelector('#scp-theme-save-new').addEventListener('click', async () => {
-            const name = await showCustomDialog({ type: 'prompt', title: 'Save Theme', message: 'Enter name for theme:', placeholder: 'My Theme' });
+        profileRow.querySelector('#scp-theme-save').addEventListener('click', () => {
+            const name = sel.value;
+            if (!name) return;
+            s.savedThemes[name] = { ...s.customTheme };
+            saveSettings(); toastr.success(`Theme "${name}" updated`, EXT_DISPLAY);
+        });
+
+        profileRow.querySelector('#scp-theme-create').addEventListener('click', async () => {
+            const name = await showCustomDialog({ type: 'prompt', title: 'New Theme', message: 'Enter name for new theme:', placeholder: 'My New Theme' });
             if (!name?.trim()) return;
-            if (!s.savedThemes) s.savedThemes = {};
-            s.savedThemes[name.trim()] = { ...s.customTheme };
-            s.activeThemeProfile = name.trim();
-            saveSettings(); buildThemeEditor(); toastr.success(`Saved theme "${name.trim()}"`, EXT_DISPLAY);
+            const n = name.trim();
+            s.savedThemes[n] = { ...s.customTheme };
+            s.activeThemeProfile = n;
+            saveSettings(); buildThemeEditor(); toastr.success(`Created theme "${n}"`, EXT_DISPLAY);
+        });
+
+        profileRow.querySelector('#scp-theme-rename').addEventListener('click', async () => {
+            const val = sel.value; if (!val) return;
+            const newName = await showCustomDialog({ type: 'prompt', title: 'Rename Theme', message: 'Enter new name:', defaultValue: val });
+            if (!newName?.trim() || newName.trim() === val) return;
+            const n = newName.trim();
+            s.savedThemes[n] = s.savedThemes[val];
+            delete s.savedThemes[val];
+            s.activeThemeProfile = n;
+            saveSettings(); buildThemeEditor(); toastr.success('Theme renamed.', EXT_DISPLAY);
         });
 
         profileRow.querySelector('#scp-theme-delete').addEventListener('click', async () => {
             const val = sel.value; if (!val) return;
+            if (Object.keys(s.savedThemes).length <= 1) {
+                toastr.warning('Cannot delete the last remaining theme.', EXT_DISPLAY);
+                return;
+            }
             const ok = await showCustomDialog({ type: 'confirm', title: 'Delete Theme', message: `Delete "${val}"?` });
             if (!ok) return;
             delete s.savedThemes[val];
-            if (s.activeThemeProfile === val) s.activeThemeProfile = '';
-            saveSettings(); buildThemeEditor(); toastr.success('Deleted.', EXT_DISPLAY);
+            s.activeThemeProfile = Object.keys(s.savedThemes)[0];
+            s.customTheme = { ...s.savedThemes[s.activeThemeProfile] };
+            saveSettings(); applyCustomTheme(s.customTheme); buildThemeEditor();
+            toastr.success('Deleted.', EXT_DISPLAY);
         });
 
         // Preset pills
@@ -1577,11 +1603,16 @@
             const input = document.createElement('input'); input.type = 'text'; input.className = 'scp-theme-var-input';
             input.value = curVal; input.placeholder = def.hint; input.dataset.key = def.key;
             input.addEventListener('input', () => {
-                const s2 = getSettings(); if (!s2.customTheme) s2.customTheme = {};
-                s2.customTheme[def.key] = input.value; s2.activeThemeProfile = ''; saveSettings();
+                const s2 = getSettings(); 
+                if (!s2.customTheme) s2.customTheme = {};
+                
+                s2.customTheme[def.key] = input.value;
+                
+                saveSettings();
                 applyCustomTheme(s2.customTheme);
-                preview.style.background = input.value; preview.style.display = input.value ? '' : 'none';
-                sel.value = '';
+                
+                preview.style.background = input.value; 
+                preview.style.display = input.value ? '' : 'none';
             });
             wrap.appendChild(preview); wrap.appendChild(input);
             item.appendChild(label); item.appendChild(wrap); grid.appendChild(item);
