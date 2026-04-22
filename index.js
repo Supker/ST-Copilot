@@ -1298,7 +1298,9 @@
     function restoreFromMinimize() { const s = getSettings(); s.minimized = false; windowEl.style.display = 'flex'; iconEl.style.display = 'none'; saveSettings(); scrollToBottom(); }
     function hideWindow() { const s = getSettings(); s.windowVisible = false; s.minimized = false; windowEl.style.display = 'none'; iconEl.style.display = 'none'; saveSettings(); }
     function showWindow() {
-        const s = getSettings(); s.windowVisible = true;
+        const s = getSettings(); 
+        if (!s.enabled) { toastr.warning('ST-Copilot is disabled.', EXT_DISPLAY); return; }
+        s.windowVisible = true;
         if (s.minimized) { iconEl.style.display = 'flex'; windowEl.style.display = 'none'; }
         else { windowEl.style.display = 'flex'; iconEl.style.display = 'none'; }
         saveSettings(); scrollToBottom();
@@ -1317,7 +1319,7 @@
     function setupHotkey() {
         if (_hotkeyHandler) document.removeEventListener('keydown', _hotkeyHandler);
         const s = getSettings();
-        if (!s.hotkeyEnabled || !s.hotkey) return;
+        if (!s.enabled || !s.hotkeyEnabled || !s.hotkey) return;
         const parts = s.hotkey.toLowerCase().split('+').map(p => p.trim());
         const key = parts[parts.length - 1];
         const needAlt = parts.includes('alt'), needCtrl = parts.includes('ctrl') || parts.includes('control');
@@ -1416,6 +1418,7 @@
         Object.assign(s, p); s.activeProfile = name;
         if (p.customTheme) applyCustomTheme(p.customTheme);
         saveSettings();
+        if (typeof updateSettingsUI === 'function') updateSettingsUI();
     }
 
     function deleteProfile(name) {
@@ -1428,16 +1431,41 @@
     function refreshProfilesDropdown() {
         const sel = $('scp-profile-select'); if (!sel) return;
         const s = getSettings();
-        sel.innerHTML = '<option value="">-- No Configuration --</option>';
+
+        if (Object.keys(s.profiles).length === 0) {
+            s.profiles['Default'] = {
+                systemPrompt: DEFAULT_SYSTEM_PROMPT, includeSystemPrompt: true,
+                includeAuthorsNote: true, includeCharacterCard: true,
+                includeUserPersonality: true, contextDepth: 15,
+                localHistoryLimit: 50, customTheme: { ...THEME_PRESETS.default },
+                connectionSource: 'default', connectionProfileId: '',
+                maxTokens: 2048,
+            };
+            s.activeProfile = 'Default';
+            saveSettings();
+        }
+
+        sel.innerHTML = '';
+        let hasActive = false;
+
         for (const name of Object.keys(s.profiles)) {
             const opt = document.createElement('option');
             opt.value = name; opt.textContent = name;
-            opt.selected = name === s.activeProfile;
+            if (name === s.activeProfile) {
+                opt.selected = true;
+                hasActive = true;
+            }
             sel.appendChild(opt);
         }
+
+        if (!hasActive && Object.keys(s.profiles).length > 0) {
+            const first = Object.keys(s.profiles)[0];
+            loadProfile(first);
+            sel.value = first;
+        }
+
         updateBindingSection();
     }
-
     function updateBindingSection() {
         const sel = $('scp-profile-select'); const section = $('scp-binding-section');
         if (!section) return;
@@ -1615,6 +1643,44 @@
     function autoResize(el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 180)}px`; }
 
     // ─── Settings Panel Handlers ─────────────────────────────────────────────────
+    
+    function updateSettingsUI() {
+        const s = getSettings();
+        const setC = (id, k) => { const el = $(id); if (el) el.checked = !!s[k]; };
+        const setI = (id, k) => { const el = $(id); if (el) el.value = s[k] ?? ''; };
+        
+        setC('scp-enabled', 'enabled');
+        setC('scp-hotkey-enabled', 'hotkeyEnabled');
+        setC('scp-include-sysprompt', 'includeSystemPrompt');
+        setC('scp-include-anote', 'includeAuthorsNote');
+        setC('scp-include-charcard', 'includeCharacterCard');
+        setC('scp-include-persona', 'includeUserPersonality');
+        setI('scp-hotkey', 'hotkey');
+        setI('scp-max-tokens', 'maxTokens');
+        setI('scp-history-limit', 'localHistoryLimit');
+        setI('scp-depth-slider', 'contextDepth');
+        
+        const dv = $('scp-depth-val');
+        if (dv) dv.textContent = s.contextDepth ?? 15;
+        
+        const cs = $('scp-conn-source');
+        if (cs) {
+            cs.value = s.connectionSource ?? 'default';
+            const g = $('scp-profile-group');
+            if (g) g.style.display = cs.value === 'profile' ? '' : 'none';
+        }
+        
+        const spEl = $('scp-sysprompt');
+        if (spEl) spEl.value = s.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+        
+        const profSel = $('scp-conn-profile');
+        if (profSel) profSel.value = s.connectionProfileId ?? '';
+
+        const wand = $('scp-wand-btn');
+        if (wand) wand.style.display = s.enabled ? '' : 'none';
+
+        if (typeof buildThemeEditor === 'function') buildThemeEditor();
+    }
 
     function setupSettingsHandlers() {
         const s = getSettings();
@@ -1637,7 +1703,13 @@
             el.addEventListener('change', () => { getSettings()[key] = el.value; saveSettings(); if (cb) cb(el.value); });
         };
 
-        bindCheck('scp-enabled', 'enabled');
+        bindCheck('scp-enabled', 'enabled', () => {
+            const ss = getSettings();
+            const btn = $('scp-wand-btn');
+            if (btn) btn.style.display = ss.enabled ? '' : 'none';
+            if (!ss.enabled) hideWindow();
+            setupHotkey();
+        });
         bindCheck('scp-hotkey-enabled', 'hotkeyEnabled');
         bindCheck('scp-include-sysprompt', 'includeSystemPrompt', updCtx);
         bindCheck('scp-include-anote', 'includeAuthorsNote', updCtx);
@@ -1688,12 +1760,36 @@
             updateBindingSection();
         });
 
-        $('scp-profile-save-new')?.addEventListener('click', async () => {
-            const name = await showCustomDialog({ type: 'prompt', title: 'Save Configuration', message: 'Enter a name for this configuration:', placeholder: 'My Config' });
+        $('scp-profile-save')?.addEventListener('click', async () => {
+            const sel = $('scp-profile-select');
+            let name = sel?.value;
+            if (!name) {
+                name = await showCustomDialog({ type: 'prompt', title: 'Save Configuration', message: 'Enter a name for this configuration:', placeholder: 'My Config' });
+                if (!name?.trim()) return;
+                name = name.trim();
+            }
+            saveProfile(name); refreshProfilesDropdown();
+            if (sel) sel.value = name;
+            updateBindingSection(); toastr.success(`Saved "${name}"`, EXT_DISPLAY);
+        });
+
+        $('scp-profile-create-new')?.addEventListener('click', async () => {
+            const name = await showCustomDialog({ type: 'prompt', title: 'New Configuration', message: 'Enter a name for the new default profile:', placeholder: 'New Config' });
             if (!name?.trim()) return;
-            saveProfile(name.trim()); refreshProfilesDropdown();
-            const sel = $('scp-profile-select'); if (sel) sel.value = name.trim();
-            updateBindingSection(); toastr.success(`Saved "${name.trim()}"`, EXT_DISPLAY);
+            const n = name.trim();
+            const s2 = getSettings();
+            s2.profiles[n] = {
+                systemPrompt: DEFAULT_SYSTEM_PROMPT, includeSystemPrompt: true,
+                includeAuthorsNote: true, includeCharacterCard: true,
+                includeUserPersonality: true, contextDepth: 15,
+                localHistoryLimit: 50, customTheme: { ...THEME_PRESETS.default },
+                connectionSource: 'default', connectionProfileId: '',
+                maxTokens: 2048,
+            };
+            saveSettings(); refreshProfilesDropdown();
+            loadProfile(n);
+            const sel = $('scp-profile-select'); if (sel) sel.value = n;
+            updateBindingSection(); toastr.success(`Created "${n}"`, EXT_DISPLAY);
         });
 
         $('scp-profile-rename')?.addEventListener('click', async () => {
@@ -1712,6 +1808,11 @@
 
         $('scp-profile-delete')?.addEventListener('click', async () => {
             const sel = $('scp-profile-select'); if (!sel?.value) return;
+            const s2 = getSettings();
+            if (Object.keys(s2.profiles).length <= 1) {
+                toastr.warning('Cannot delete the last remaining configuration profile.', EXT_DISPLAY);
+                return;
+            }
             const ok = await showCustomDialog({ type: 'confirm', title: 'Delete Configuration', message: `Delete "${sel.value}"?` });
             if (!ok) return;
             deleteProfile(sel.value); refreshProfilesDropdown(); updateBindingSection();
@@ -1893,6 +1994,7 @@
         btn.id = 'scp-wand-btn';
         btn.classList.add('list-group-item', 'flex-container', 'flexGap5');
         btn.innerHTML = `<div class="fa-solid fa-robot extensionsMenuExtensionButton"></div><span>${EXT_DISPLAY}</span>`;
+        btn.style.display = getSettings().enabled ? '' : 'none';
         btn.addEventListener('click', toggleVisibility);
         menu.appendChild(btn);
     }
