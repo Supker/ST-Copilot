@@ -1,0 +1,117 @@
+<div class="st-copilot-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>ST-Copilot</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+        </div>
+        <div class="inline-drawer-content" style="padding-top:10px;">
+            <div class="flex-container flexFlowColumn gap-1">
+
+                <!-- ── General ─────────────────────────────────── -->
+                <div class="scp-settings-flat-section">
+                    <div class="scp-settings-flat-title"><i class="fa-solid fa-sliders"></i> General</div>
+                    <label class="checkbox_label">
+                        <input id="scp-enabled" type="checkbox" />
+                        <span>Enable ST-Copilot</span>
+                    </label>
+                    <div style="margin-top:10px">
+                        <b style="font-size:12px">Keyboard Shortcut</b>
+                        <label class="checkbox_label" style="margin-top:6px">
+                            <input id="scp-hotkey-enabled" type="checkbox" />
+                            <span>Enable shortcut to toggle window</span>
+                        </label>
+                        <input id="scp-hotkey" type="text" class="text_pole" placeholder="e.g. Alt+Shift+C" style="margin-top:5px" />
+                    </div>
+                    <div style="margin-top:10px; display:flex; gap:6px">
+                        <button id="scp-open-window" class="menu_button interactable" style="flex:1">
+                            <i class="fa-solid fa-robot"></i> Open Copilot
+                        </button>
+                        <button id="scp-clear-sessions" class="menu_button interactable" style="flex:1">
+                            <i class="fa-solid fa-broom"></i> Clear Sessions
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ── Configuration Profiles ─────────────────── -->
+                <div class="scp-settings-flat-section">
+                    <div class="scp-settings-flat-title"><i class="fa-solid fa-bookmark"></i> Configuration Profiles</div>
+                    <div class="scp-profile-bar">
+                        <select id="scp-profile-select"><option value="">-- No Configuration --</option></select>
+                        <button class="scp-profile-icon-btn" id="scp-profile-save-new" title="Save new"><i class="fa-solid fa-floppy-disk"></i></button>
+                        <button class="scp-profile-icon-btn" id="scp-profile-rename" title="Rename"><i class="fa-solid fa-pen"></i></button>
+                        <button class="scp-profile-icon-btn danger" id="scp-profile-delete" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                    <div id="scp-binding-section" class="scp-binding-row" style="display:none">
+                        <span class="scp-binding-label">Auto-load for:</span>
+                        <button class="scp-bind-btn" id="scp-bind-char"><i class="fa-solid fa-user"></i> Character</button>
+                        <button class="scp-bind-btn" id="scp-bind-chat"><i class="fa-solid fa-comments"></i> Chat</button>
+                    </div>
+                </div>
+
+                <!-- ── Connection ──────────────────────────────── -->
+                <div class="inline-drawer scp-settings-drawer">
+                    <div class="inline-drawer-toggle inline-drawer-header">
+                        <b><i class="fa-solid fa-plug" style="margin-right:6px"></i>Connection</b>
+                        <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+                    </div>
+                    <div class="inline-drawer-content">
+                        <select id="scp-conn-source" class="text_pole">
+                            <option value="default">Use Currently Selected API</option>
+                            <option value="profile">Use Specific Profile</option>
+                        </select>
+                        <div id="scp-profile-group" style="display:none; margin-top:8px">
+                            <label style="font-size:11px; color:#888; display:block; margin-bottom:4px">Connection Profile</label>
+                            <select id="scp-conn-profile" class="text_pole">
+                                <option value="">-- Select Profile --</option>
+                            </select>
+                        </div>
+                        <label style="margin-top:10px; font-size:11px; color:#888; display:block; margin-bottom:4px">Max Response Tokens</label>
+                        <input id="scp-max-tokens" type="number" class="text_pole" placeholder="2048" min="64" max="32768" />
+                    </div>
+                </div>
+
+                <!-- ── Context Payload ────────────────────────── -->
+                <div class="inline-drawer scp-settings-drawer">
+                    <div class="inline-drawer-toggle inline-drawer-header">
+                        <b><i class="fa-solid fa-box-archive" style="margin-right:6px"></i>Context Payload</b>
+                        <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+                    </div>
+                    <div class="inline-drawer-content">
+                        <div style="display:flex; flex-direction:column; gap:4px">
+                            <label class="checkbox_label"><input id="scp-include-sysprompt" type="checkbox" /><span>Include ST System Prompt</span></label>
+                            <label class="checkbox_label"><input id="scp-include-anote" type="checkbox" /><span>Include Author's Note</span></label>
+                            <label class="checkbox_label"><input id="scp-include-charcard" type="checkbox" /><span>Include Character Card</span></label>
+                            <label class="checkbox_label"><input id="scp-include-persona" type="checkbox" /><span>Include User Persona</span></label>
+                        </div>
+                        <label style="margin-top:10px; font-size:11px; color:#888; display:block; margin-bottom:4px">Session History Depth Limit</label>
+                        <input id="scp-history-limit" type="number" class="text_pole" placeholder="50" min="1" max="500" />
+                    </div>
+                </div>
+
+                <!-- ── System Prompt ──────────────────────────── -->
+                <div class="inline-drawer scp-settings-drawer">
+                    <div class="inline-drawer-toggle inline-drawer-header">
+                        <b><i class="fa-solid fa-message" style="margin-right:6px"></i>System Prompt</b>
+                        <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+                    </div>
+                    <div class="inline-drawer-content">
+                        <textarea id="scp-sysprompt" class="text_pole autoSetHeight" rows="6" style="font-size:12px; margin-top:4px"></textarea>
+                        <button id="scp-reset-prompt" class="menu_button interactable" style="margin-top:6px; align-self:flex-start">
+                            <i class="fa-solid fa-arrow-rotate-left"></i> Reset to Default
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ── Interface Theme ─────────────────────────── -->
+                <div class="inline-drawer scp-settings-drawer">
+                    <div class="inline-drawer-toggle inline-drawer-header">
+                        <b><i class="fa-solid fa-palette" style="margin-right:6px"></i>Interface Theme</b>
+                        <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+                    </div>
+                    <div class="inline-drawer-content" id="scp-theme-section"></div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>

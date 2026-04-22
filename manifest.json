@@ -1,0 +1,12 @@
+{
+    "display_name": "ST-Copilot",
+    "loading_order": 60,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "ST-Copilot",
+    "version": "1.0.0",
+    "homePage": "",
+    "auto_update": false
+}

@@ -1,0 +1,1938 @@
+(function () {
+    'use strict';
+
+    const EXT_NAME = 'st_copilot';
+    const EXT_DISPLAY = 'ST-Copilot';
+    const WIN_ID = 'scp-window';
+    const ICON_ID = 'scp-dock-icon';
+    const MODAL_ID = 'scp-ctx-modal';
+
+    let __extPath = 'third-party/ST-Copilot';
+    if (document.currentScript && document.currentScript.src) {
+        const match = new URL(document.currentScript.src).pathname.match(/\/scripts\/extensions\/(.+)\/[^\/]+\.js$/);
+        if (match) __extPath = match[1];
+    } else {
+        for (let s of document.getElementsByTagName('script')) {
+            if (s.src && s.src.includes('index.js') && s.src.toLowerCase().includes('copilot')) {
+                const match = new URL(s.src).pathname.match(/\/scripts\/extensions\/(.+)\/[^\/]+\.js$/);
+                if (match) { __extPath = match[1]; break; }
+            }
+        }
+    }
+
+    const DEFAULT_SYSTEM_PROMPT =
+        `<system_prompt>\n` +
+        `<system_role>\n` +
+        `You are "ST-Copilot", an advanced meta-assistant and creative co-writer integrated directly into the SillyTavern frontend. Your purpose is to assist the human user in managing, analyzing, and expanding their current roleplay session. \n` +
+        `</system_role>\n\n` +
+        `<entity_definitions>\n` +
+        `To perform your duties perfectly, you must understand the entities involved in this session:\n` +
+        `- {{user}}: The character/avatar actively controlled by the human user in the roleplay.\n` +
+        `- {{char}}: The primary AI character, persona, or setting of the current roleplay.\n` +
+        `- ST-Copilot (You): The Out-Of-Character (OOC) analytical engine and brainstormer. \n` +
+        `CRITICAL DIRECTIVE: You are ST-Copilot. You are STRICTLY NOT {{char}}. You must never generate roleplay responses, dialogue, or actions on behalf of {{char}} or {{user}}. You exist outside the narrative.\n` +
+        `</entity_definitions>\n\n` +
+        `<operational_guidelines>\n` +
+        `When the user asks you a question or requests assistance, adhere to the following principles:\n` +
+        `1. Contextual Brilliance: Draw upon the provided chat history and {{char}}'s traits to give highly relevant, lore-accurate answers.\n` +
+        `2. Creative Brainstorming: Offer imaginative plot twists, analyze character motivations, suggest possible scenarios, or help resolve writer's block. Leave room for the user's imagination—do not force a single narrative path.\n` +
+        `3. Tone: Be conversational, insightful, collaborative, and strictly Out-Of-Character. Act as a friendly "Dungeon Master's assistant" or professional co-author.\n` +
+        `4. Formatting: Use markdown (bullet points, bold text, etc.) to make your insights readable and engaging.\n` +
+        `</operational_guidelines>\n\n` +
+        `Your ultimate goal is to enhance the user's roleplay experience by providing deep insights, tracking lore, and answering questions about the current state of the game.\n` +
+        `</system_prompt>`;
+
+        
+    // ─── Theme Presets ──────────────────────────────────────────────────────────
+
+    const THEME_PRESETS = {
+        default: {
+            label: 'Default Dark',
+            bg: 'rgba(18,18,22,0.94)', blur: 'blur(14px)',
+            text: '#e2e2e6', textMuted: '#72728a',
+            accent: '#7c6dfa', accentDim: 'rgba(124,109,250,0.45)',
+            accentBg: 'rgba(124,109,250,0.12)',
+            headerBg: 'rgba(255,255,255,0.04)', toolbarBg: 'rgba(0,0,0,0.25)',
+            msgUserBg: 'rgba(124,109,250,0.10)', msgAiBg: 'rgba(255,255,255,0.03)',
+            inputBg: 'rgba(0,0,0,0.30)', codeBg: 'rgba(0,0,0,0.35)',
+            radius: '10px', danger: '#ff5c5c', success: '#4caf7d',
+            shadow: '0 24px 64px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4)',
+            border: '1px solid rgba(255,255,255,0.09)', font: '',
+        },
+        deep: {
+            label: 'Deep Dark',
+            bg: 'rgba(10,10,12,0.97)', blur: 'blur(0px)',
+            text: '#c8c8d0', textMuted: '#505060',
+            accent: '#8b7cf8', accentDim: 'rgba(139,124,248,0.4)',
+            accentBg: 'rgba(139,124,248,0.08)',
+            headerBg: 'rgba(0,0,0,0.5)', toolbarBg: 'rgba(0,0,0,0.4)',
+            msgUserBg: 'rgba(139,124,248,0.07)', msgAiBg: 'rgba(255,255,255,0.02)',
+            inputBg: 'rgba(0,0,0,0.5)', codeBg: 'rgba(0,0,0,0.6)',
+            radius: '10px', danger: '#ff5c5c', success: '#4caf7d',
+            shadow: '0 24px 64px rgba(0,0,0,0.8), 0 4px 16px rgba(0,0,0,0.6)',
+            border: '1px solid rgba(255,255,255,0.06)', font: '',
+        },
+        glass: {
+            label: 'Glass',
+            bg: 'rgba(40,40,55,0.55)', blur: 'blur(22px) saturate(1.6)',
+            text: '#f0efff', textMuted: '#9898b8',
+            accent: '#a78bfa', accentDim: 'rgba(167,139,250,0.5)',
+            accentBg: 'rgba(167,139,250,0.14)',
+            headerBg: 'rgba(255,255,255,0.07)', toolbarBg: 'rgba(255,255,255,0.05)',
+            msgUserBg: 'rgba(167,139,250,0.10)', msgAiBg: 'rgba(255,255,255,0.05)',
+            inputBg: 'rgba(0,0,0,0.25)', codeBg: 'rgba(0,0,0,0.30)',
+            radius: '12px', danger: '#ff5c5c', success: '#4caf7d',
+            shadow: '0 20px 60px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1) inset',
+            border: '1px solid rgba(255,255,255,0.18)', font: '',
+        },
+        hacker: {
+            label: 'Hacker',
+            bg: 'rgba(6,14,6,0.97)', blur: 'blur(0px)',
+            text: '#88ee88', textMuted: '#3a6640',
+            accent: '#00ff88', accentDim: 'rgba(0,255,136,0.45)',
+            accentBg: 'rgba(0,255,136,0.08)',
+            headerBg: 'rgba(0,255,136,0.06)', toolbarBg: 'rgba(0,0,0,0.6)',
+            msgUserBg: 'rgba(0,255,136,0.05)', msgAiBg: 'rgba(0,0,0,0.4)',
+            inputBg: 'rgba(0,0,0,0.55)', codeBg: 'rgba(0,0,0,0.7)',
+            radius: '4px', danger: '#ff4444', success: '#00ff88',
+            shadow: '0 0 30px rgba(0,255,136,0.08), 0 16px 48px rgba(0,0,0,0.8)',
+            border: '1px solid #00c77044', font: "'Consolas','Courier New',monospace",
+        },
+        native: {
+            label: 'Native ST',
+            bg: 'var(--SmartThemeBlurTrans, rgba(20,20,24,0.92))', blur: 'var(--smartThemeBlur, blur(12px))',
+            text: 'var(--SmartThemeBodyColorText, #e2e2e6)', textMuted: 'var(--SmartThemeBodyColorTextMuted, #72728a)',
+            accent: 'var(--smartThemeMenuColorText, #7c6dfa)', accentDim: 'var(--white30a, rgba(255,255,255,0.3))',
+            accentBg: 'var(--white10a, rgba(255,255,255,0.08))',
+            headerBg: 'var(--black30a, rgba(0,0,0,0.3))', toolbarBg: 'var(--black50a, rgba(0,0,0,0.25))',
+            msgUserBg: 'var(--black30a, rgba(0,0,0,0.18))', msgAiBg: 'rgba(255,255,255,0.025)',
+            inputBg: 'var(--black50a, rgba(0,0,0,0.3))', codeBg: 'var(--black50a, rgba(0,0,0,0.35))',
+            radius: '10px', danger: '#ff5c5c', success: '#4caf7d',
+            shadow: '0 24px 64px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4)',
+            border: 'var(--smartThemeBorder, 1px solid rgba(255,255,255,0.09))', font: '',
+        },
+    };
+
+    const THEME_VAR_DEFS = [
+        { key: 'bg',         label: 'Background',    hint: 'rgba(r,g,b,a)' },
+        { key: 'blur',       label: 'Blur',          hint: 'blur(14px)' },
+        { key: 'border',     label: 'Border',        hint: '1px solid rgba(...)' },
+        { key: 'text',       label: 'Text',          hint: '#hex or rgba' },
+        { key: 'textMuted',  label: 'Muted Text',    hint: '#hex or rgba' },
+        { key: 'accent',     label: 'Accent',        hint: '#hex or rgba' },
+        { key: 'accentDim',  label: 'Accent Dim',    hint: 'rgba(r,g,b,a)' },
+        { key: 'accentBg',   label: 'Accent BG',     hint: 'rgba(r,g,b,a)' },
+        { key: 'headerBg',   label: 'Header BG',     hint: 'rgba(r,g,b,a)' },
+        { key: 'toolbarBg',  label: 'Toolbar BG',    hint: 'rgba(r,g,b,a)' },
+        { key: 'msgUserBg',  label: 'User Msg BG',   hint: 'rgba(r,g,b,a)' },
+        { key: 'msgAiBg',    label: 'AI Msg BG',     hint: 'rgba(r,g,b,a)' },
+        { key: 'inputBg',    label: 'Input BG',      hint: 'rgba(r,g,b,a)' },
+        { key: 'codeBg',     label: 'Code BG',       hint: 'rgba(r,g,b,a)' },
+        { key: 'radius',     label: 'Corner Radius', hint: '10px' },
+        { key: 'shadow',     label: 'Shadow',        hint: 'CSS box-shadow' },
+        { key: 'danger',     label: 'Danger Color',  hint: '#ff5c5c' },
+        { key: 'success',    label: 'Success Color', hint: '#4caf7d' },
+        { key: 'font',       label: 'Font Family',   hint: "system-ui, sans-serif" },
+    ];
+
+    const THEME_CSS_MAP = {
+        bg: '--scp-bg', blur: '--scp-blur', border: '--scp-border',
+        text: '--scp-text', textMuted: '--scp-text-muted',
+        accent: '--scp-accent', accentDim: '--scp-accent-dim', accentBg: '--scp-accent-bg',
+        headerBg: '--scp-header-bg', toolbarBg: '--scp-toolbar-bg',
+        msgUserBg: '--scp-msg-user-bg', msgAiBg: '--scp-msg-ai-bg',
+        inputBg: '--scp-input-bg', codeBg: '--scp-code-bg',
+        radius: '--scp-radius', shadow: '--scp-shadow',
+        danger: '--scp-danger', success: '--scp-success', font: '--scp-font',
+    };
+
+    // ─── Settings ───────────────────────────────────────────────────────────────
+
+    function getSettings() {
+        const { extensionSettings } = SillyTavern.getContext();
+        if (!extensionSettings[EXT_NAME]) extensionSettings[EXT_NAME] = {};
+        const s = extensionSettings[EXT_NAME];
+        const defaults = {
+            enabled: true,
+            windowVisible: false,
+            minimized: false,
+            windowX: null, windowY: null,
+            iconX: null, iconY: null,
+            windowW: 440, windowH: 600,
+            opacity: 95,
+            hotkey: 'Alt+Shift+C',
+            hotkeyEnabled: true,
+            contextDepth: 15,
+            localHistoryLimit: 50,
+            connectionSource: 'default',
+            connectionProfileId: '',
+            maxTokens: 2048,
+            includeSystemPrompt: true,
+            includeAuthorsNote: true,
+            includeCharacterCard: true,
+            includeUserPersonality: true,
+            systemPrompt: DEFAULT_SYSTEM_PROMPT,
+            profiles: {},
+            activeProfile: '',
+            profileBindings: {},
+            customTheme: { ...THEME_PRESETS.default },
+            savedThemes: {},
+            activeThemeProfile: '',
+            sessions: {},
+        };
+        for (const [k, v] of Object.entries(defaults)) {
+            if (s[k] === undefined) s[k] = v;
+        }
+        return s;
+    }
+
+    function saveSettings() {
+        SillyTavern.getContext().saveSettingsDebounced();
+    }
+
+    // ─── Custom Dialog (replaces browser prompt/confirm/alert) ──────────────────
+
+    function escHtml(str) {
+        return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function showCustomDialog({ type = 'alert', title = '', message = '', defaultValue = '', placeholder = '', delayConfirm = 0 }) {
+        return new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.className = 'scp-dialog-overlay';
+            const isPrompt = type === 'prompt';
+            const isConfirm = type === 'confirm';
+            overlay.innerHTML = `
+                <div class="scp-dialog-box">
+                    ${title ? `<div class="scp-dialog-title">${escHtml(title)}</div>` : ''}
+                    ${message ? `<div class="scp-dialog-msg">${escHtml(message)}</div>` : ''}
+                    ${isPrompt ? `<input type="text" class="scp-dialog-input" value="${escHtml(defaultValue)}" placeholder="${escHtml(placeholder)}">` : ''}
+                    <div class="scp-dialog-btns">
+                        ${(isPrompt || isConfirm) ? `<button class="scp-dialog-btn scp-dialog-cancel">Cancel</button>` : ''}
+                        <button class="scp-dialog-btn scp-dialog-ok${isConfirm ? ' danger' : ''}">${isConfirm ? 'Confirm' : 'OK'}</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+            const input = overlay.querySelector('.scp-dialog-input');
+            const okBtn = overlay.querySelector('.scp-dialog-ok');
+            const cancelBtn = overlay.querySelector('.scp-dialog-cancel');
+            
+            let timerIntv = null;
+            let currentDelay = delayConfirm;
+            const origOkText = okBtn.textContent;
+
+            const close = val => { 
+                if (timerIntv) clearInterval(timerIntv);
+                overlay.classList.remove('visible'); 
+                setTimeout(() => overlay.remove(), 150); 
+                resolve(val); 
+            };
+
+            if (isConfirm && currentDelay > 0) {
+                okBtn.disabled = true;
+                okBtn.style.opacity = '0.5';
+                okBtn.style.cursor = 'not-allowed';
+                okBtn.textContent = `${origOkText} (${currentDelay})`;
+                timerIntv = setInterval(() => {
+                    currentDelay--;
+                    if (currentDelay <= 0) {
+                        clearInterval(timerIntv);
+                        timerIntv = null;
+                        okBtn.disabled = false;
+                        okBtn.style.opacity = '1';
+                        okBtn.style.cursor = '';
+                        okBtn.textContent = origOkText;
+                        if (!input) okBtn.focus();
+                    } else {
+                        okBtn.textContent = `${origOkText} (${currentDelay})`;
+                    }
+                }, 1000);
+            }
+
+            if (input) { input.focus(); input.select(); } else if (currentDelay <= 0) { setTimeout(() => okBtn.focus(), 50); }
+            
+            okBtn.addEventListener('click', () => { if (!okBtn.disabled) close(isPrompt ? input.value : true); });
+            cancelBtn?.addEventListener('click', () => close(isPrompt ? null : false));
+            overlay.addEventListener('click', e => { if (e.target === overlay) close(isPrompt ? null : false); });
+            const keyHandler = e => {
+                if (e.key === 'Enter') { e.preventDefault(); if (!okBtn.disabled) close(isPrompt ? input.value : true); }
+                if (e.key === 'Escape') close(isPrompt ? null : false);
+            };
+            (input || overlay).addEventListener('keydown', keyHandler);
+            requestAnimationFrame(() => overlay.classList.add('visible'));
+        });
+    }
+
+    // ─── Session & Binding ──────────────────────────────────────────────────────
+
+    function getBindingKey() {
+        const ctx = SillyTavern.getContext();
+        const charId = String(ctx.characterId ?? 'global');
+        let chatId = 'default';
+        try {
+            if (typeof ctx.getCurrentChatId === 'function') {
+                const r = ctx.getCurrentChatId(); if (r) chatId = String(r);
+            } else if (ctx.chatId) { chatId = String(ctx.chatId);
+            } else if (ctx.chat?.length) {
+                const first = ctx.chat[0];
+                chatId = first.send_date ? String(first.send_date) : `len_${ctx.chat.length}`;
+            }
+        } catch (_) {}
+        return { charId, chatId };
+    }
+
+    function getChatBucket(charId, chatId) {
+        const s = getSettings();
+        if (!s.sessions[charId]) s.sessions[charId] = {};
+        if (!s.sessions[charId][chatId]) s.sessions[charId][chatId] = { activeSessionId: null, sessions: [] };
+        return s.sessions[charId][chatId];
+    }
+
+    function genId(prefix) { return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`; }
+
+    function createSession(charId, chatId, name) {
+        const bucket = getChatBucket(charId, chatId);
+        const id = genId('sess');
+        const sess = { id, name: name || `Session ${bucket.sessions.length + 1}`, created: Date.now(), messages: [] };
+        bucket.sessions.push(sess);
+        bucket.activeSessionId = id;
+        saveSettings();
+        return sess;
+    }
+
+    function getActiveSession(charId, chatId) {
+        const bucket = getChatBucket(charId, chatId);
+        if (!bucket.sessions.length || !bucket.activeSessionId) return createSession(charId, chatId);
+        return bucket.sessions.find(s => s.id === bucket.activeSessionId) || createSession(charId, chatId);
+    }
+
+    function setActiveSession(charId, chatId, sessionId) {
+        const bucket = getChatBucket(charId, chatId);
+        if (bucket.sessions.find(s => s.id === sessionId)) { bucket.activeSessionId = sessionId; saveSettings(); }
+    }
+
+    function deleteCurrentSession(charId, chatId) {
+        const bucket = getChatBucket(charId, chatId);
+        if (!bucket.sessions.length) return createSession(charId, chatId);
+        bucket.sessions = bucket.sessions.filter(s => s.id !== bucket.activeSessionId);
+        bucket.activeSessionId = bucket.sessions.length ? bucket.sessions[bucket.sessions.length - 1].id : null;
+        saveSettings();
+        return getActiveSession(charId, chatId);
+    }
+
+    function addMessage(session, role, content) {
+        const msg = { id: genId('msg'), role, content, timestamp: Date.now() };
+        session.messages.push(msg); saveSettings(); return msg;
+    }
+    function updateMessage(session, msgId, newContent) {
+        const msg = session.messages.find(m => m.id === msgId);
+        if (msg) { msg.content = newContent; saveSettings(); }
+    }
+    function truncateAfter(session, msgId) {
+        const idx = session.messages.findIndex(m => m.id === msgId);
+        if (idx !== -1) { session.messages.splice(idx + 1); saveSettings(); }
+    }
+    function deleteMsg(session, msgId) {
+        const idx = session.messages.findIndex(m => m.id === msgId);
+        if (idx !== -1) { session.messages.splice(idx, 1); saveSettings(); }
+    }
+    function truncateFrom(session, msgId) {
+        const idx = session.messages.findIndex(m => m.id === msgId);
+        if (idx !== -1) { session.messages.splice(idx); saveSettings(); }
+    }
+
+    // ─── ST Context Helpers ─────────────────────────────────────────────────────
+
+    function getCharInfo() {
+        const ctx = SillyTavern.getContext();
+        const char = ctx.characters?.[ctx.characterId];
+        if (!char) return null;
+        return {
+            name: char.name || 'Unknown',
+            description: char.description || '',
+            personality: char.personality || '',
+            scenario: char.scenario || '',
+            mes_example: char.mes_example || '',
+            system_prompt: char.system_prompt || '',
+        };
+    }
+
+    function getUserPersona() {
+        const ctx = SillyTavern.getContext();
+        
+        try {
+            let expanded = '';
+            if (typeof ctx.substituteParams === 'function') {
+                expanded = ctx.substituteParams('{{persona}}');
+            } else if (typeof window.substituteParams === 'function') {
+                expanded = window.substituteParams('{{persona}}');
+            }
+            if (expanded && expanded !== '{{persona}}') return expanded;
+        } catch (_) {}
+
+        try {
+            const pu = window.power_user;
+            if (pu) {
+                if (typeof pu.persona_description === 'string' && pu.persona_description) return pu.persona_description;
+                if (pu.personas && pu.persona && pu.personas[pu.persona]?.description) return pu.personas[pu.persona].description;
+                if (typeof pu.persona === 'string' && pu.persona.length > 30 && !pu.persona.endsWith('.json')) return pu.persona;
+            }
+        } catch (_) {}
+
+        return ctx.persona || ctx.userPersona || ctx.user_persona || '';
+    }
+
+    function getAuthorsNote() {
+        const ctx = SillyTavern.getContext();
+        return ctx.chatMetadata?.note_prompt || ctx.authorsNote || ctx.authors_note || '';
+    }
+
+    // ─── Macro Expansion ────────────────────────────────────────────────────────
+
+    function expandMacros(text) {
+        if (!text) return text;
+        try {
+            const ctx = SillyTavern.getContext();
+            // Primary: use ST's own substituteParams (available in context on newer ST)
+            if (typeof ctx.substituteParams === 'function') {
+                return ctx.substituteParams(text);
+            }
+            // Fallback: window-level export (older ST versions)
+            if (typeof window.substituteParams === 'function') {
+                return window.substituteParams(text, ctx.name1, ctx.name2);
+            }
+        } catch (e) {
+            console.warn(`[${EXT_DISPLAY}] Macro expansion error:`, e);
+        }
+        // Manual fallback for the most common macros
+        try {
+            const ctx = SillyTavern.getContext();
+            const char = ctx.characters?.[ctx.characterId];
+            const now = new Date();
+            return text
+                .replace(/\{\{user\}\}/gi, ctx.name1 || 'User')
+                .replace(/\{\{char\}\}/gi, char?.name || ctx.name2 || 'Character')
+                .replace(/\{\{time\}\}/gi, now.toLocaleTimeString())
+                .replace(/\{\{date\}\}/gi, now.toLocaleDateString())
+                .replace(/\{\{isodate\}\}/gi, now.toISOString().split('T')[0])
+                .replace(/\{\{isotime\}\}/gi, now.toTimeString().slice(0, 5))
+                .replace(/\{\{lastMessage\}\}/gi, () => {
+                    const msgs = ctx.chat;
+                    return msgs?.[msgs.length - 1]?.mes || '';
+                })
+                .replace(/\{\{lastUserMessage\}\}/gi, () => {
+                    const msgs = ctx.chat;
+                    if (!msgs) return '';
+                    for (let i = msgs.length - 1; i >= 0; i--) {
+                        if (msgs[i].is_user) return msgs[i].mes || '';
+                    }
+                    return '';
+                })
+                .replace(/\{\{lastCharMessage\}\}/gi, () => {
+                    const msgs = ctx.chat;
+                    if (!msgs) return '';
+                    for (let i = msgs.length - 1; i >= 0; i--) {
+                        if (!msgs[i].is_user) return msgs[i].mes || '';
+                    }
+                    return '';
+                })
+                .replace(/\{\{description\}\}/gi, char?.description || '')
+                .replace(/\{\{personality\}\}/gi, char?.personality || '')
+                .replace(/\{\{scenario\}\}/gi, char?.scenario || '');
+        } catch (_) {
+            return text;
+        }
+    }
+
+    function getSystemPromptText() {
+        const ctx = SillyTavern.getContext();
+        return ctx.systemPrompt || ctx.system_prompt || '';
+    }
+
+    function getMainChatSlice(depth) {
+        const ctx = SillyTavern.getContext();
+        if (!ctx.chat || depth === 0) return [];
+        return ctx.chat.slice(-depth).map(m => ({
+            role: m.is_user ? 'user' : 'assistant',
+            name: m.is_user ? (ctx.name1 || 'User') : (m.name || getCharInfo()?.name || 'Character'),
+            content: typeof m.mes === 'string' ? m.mes : '',
+        }));
+    }
+
+    // ─── Payload Assembly ───────────────────────────────────────────────────────
+
+    function buildSystemContent(settings) {
+        const parts = [settings.systemPrompt || DEFAULT_SYSTEM_PROMPT];
+        const charInfo = getCharInfo();
+
+        if (settings.includeSystemPrompt) {
+            const sp = getSystemPromptText();
+            if (sp) parts.push(`\n\n<st_system_prompt>\n${sp}\n</st_system_prompt>`);
+        }
+
+        if (settings.includeCharacterCard && charInfo) {
+            let block = `Name: ${charInfo.name}`;
+            if (charInfo.description) block += `\nDescription:\n${charInfo.description}`;
+            if (charInfo.personality) block += `\nPersonality:\n${charInfo.personality}`;
+            if (charInfo.scenario) block += `\nScenario:\n${charInfo.scenario}`;
+            if (charInfo.system_prompt) block += `\nCharacter System Note:\n${charInfo.system_prompt}`;
+            parts.push(`\n\n<character_information>\n${block}\n</character_information>`);
+        }
+
+        if (settings.includeUserPersonality) {
+            const p = getUserPersona();
+            if (p) parts.push(`\n\n<{{user}}_persona>\n${p}\n</{{user}}_persona>`);
+        }
+
+        if (settings.includeAuthorsNote) {
+            const an = getAuthorsNote();
+            if (an) parts.push(`\n\n<author_notes>\n${an}\n</author_notes>`);
+        }
+
+        return parts.join('\n');
+    }
+
+    function assembleMessages(session, settings, pendingUserText) {
+        const messages = [{ role: 'system', content: buildSystemContent(settings) }];
+        const depth = Math.max(0, parseInt(settings.contextDepth) || 0);
+        if (depth > 0) {
+            const slice = getMainChatSlice(depth);
+            if (slice.length) {
+                const block = slice.map(m => `[${m.name}]: ${m.content}`).join('\n\n');
+                messages.push({
+                    role: 'user',
+                    content: `<roleplay_context last_messages="${slice.length}">\n\n${block}\n\n</roleplay_context>`,
+                });
+                messages.push({ role: 'assistant', content: 'Understood. I have reviewed the current roleplay context. How can I help?' });
+            }
+        }
+        const limit = Math.max(1, parseInt(settings.localHistoryLimit) || 50);
+        for (const m of session.messages.slice(-limit)) messages.push({ role: m.role, content: m.content });
+        if (pendingUserText) messages.push({ role: 'user', content: pendingUserText });
+        return messages;
+    }
+
+    function formatPayloadAsText(messages) {
+        return messages.map(m => {
+            const label = m.role === 'system' ? '■ SYSTEM' : m.role === 'user' ? '▶ USER' : '◀ ASSISTANT';
+            return `${label}\n${'─'.repeat(50)}\n${m.content}`;
+        }).join('\n\n');
+    }
+
+    // ─── Connection Profile Helper ──────────────────────────────────────────────
+
+    async function withConnectionProfile(profileName, fn) {
+        if (!profileName) return fn();
+
+        const ctx = SillyTavern.getContext();
+        if (typeof ctx.executeSlashCommandsWithOptions !== 'function') return fn();
+
+        let prevProfileName = '';
+        try {
+            const currentResult = await ctx.executeSlashCommandsWithOptions('/profile');
+            prevProfileName = currentResult?.pipe?.trim() || '';
+        } catch (e) {
+            console.warn(`[${EXT_DISPLAY}] Could not get current profile:`, e);
+        }
+
+        if (prevProfileName === profileName) return fn();
+
+        await ctx.executeSlashCommandsWithOptions(`/profile "${profileName}"`);
+        await new Promise(r => setTimeout(r, 450));
+
+        try {
+            return await fn();
+        } finally {
+            if (prevProfileName && prevProfileName !== profileName) {
+                await ctx.executeSlashCommandsWithOptions(`/profile "${prevProfileName}"`);
+            }
+        }
+    }
+
+    // ─── API Generation ─────────────────────────────────────────────────────────
+
+    let _abortController = null;
+
+    async function doCallGenerate(session, settings, pendingText) {
+        if (_abortController) _abortController.abort();
+        _abortController = new AbortController();
+        const signal = _abortController.signal;
+        const messages = assembleMessages(session, settings, pendingText);
+        const ctx = SillyTavern.getContext();
+        try {
+            if (typeof ctx.generateRaw === 'function') {
+                const options = {
+                    prompt: messages,
+                    bypassAll: true,
+                    signal: signal
+                };
+                if (settings.maxTokens) options.responseLength = parseInt(settings.maxTokens) || 2048;
+
+                const result = await ctx.generateRaw(options);
+                if (typeof result === 'string') return result.trim();
+                const r = result;
+                return (r?.choices?.[0]?.message?.content || r?.choices?.[0]?.text || r?.message?.content || r?.content || '').trim();
+            }
+            const res = await fetch('/api/backends/chat-completions/generate', {
+                method: 'POST',
+                headers: { ...ctx.getRequestHeaders(), 'Content-Type': 'application/json' },
+                signal,
+                body: JSON.stringify({ messages, max_tokens: parseInt(settings.maxTokens) || 2048, stream: false }),
+            });
+            if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text().catch(() => res.statusText)}`);
+            const data = await res.json();
+            return (data.choices?.[0]?.message?.content || data.output || '').trim();
+        } catch (err) {
+            if (err.name === 'AbortError') return null;
+            throw err;
+        } finally { _abortController = null; }
+    }
+
+    async function callGenerate(session, settings, pendingText) {
+        if (settings.connectionSource === 'profile' && settings.connectionProfileId) {
+            // connectionProfileId now stores the profile *name* for use with /profile slash cmd
+            return withConnectionProfile(settings.connectionProfileId, () => doCallGenerate(session, settings, pendingText));
+        }
+        return doCallGenerate(session, settings, pendingText);
+    }
+
+    // ─── SVG Icons ──────────────────────────────────────────────────────────────
+
+    const I = {
+        copy: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
+        edit: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`,
+        trash: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`,
+        send: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`,
+        search: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
+        refresh: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/></svg>`,
+        minus: `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+        x: `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+        plus: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+        bot: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><circle cx="8.5" cy="16" r="1" fill="currentColor"/><circle cx="15.5" cy="16" r="1" fill="currentColor"/></svg>`,
+        user: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
+        stop: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>`,
+        opacity: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 1 0 20z" fill="currentColor"/></svg>`,
+        check: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+        chevron: `<svg class="scp-sess-chevron" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>`,
+    };
+
+    // ─── UI Construction ────────────────────────────────────────────────────────
+
+    function buildWindowHTML() {
+        return `
+<div id="${WIN_ID}" class="scp-window" style="display:none">
+    <div class="scp-rh scp-rh-n"></div><div class="scp-rh scp-rh-e"></div>
+    <div class="scp-rh scp-rh-s"></div><div class="scp-rh scp-rh-w"></div>
+    <div class="scp-rh scp-rh-ne"></div><div class="scp-rh scp-rh-se"></div>
+    <div class="scp-rh scp-rh-sw"></div><div class="scp-rh scp-rh-nw"></div>
+
+    <div class="scp-header" id="scp-drag-handle">
+        <div class="scp-header-left">
+            <span class="scp-logo">${I.bot}</span>
+            <span class="scp-title">ST-Copilot</span>
+            <span class="scp-char-badge" id="scp-char-badge"></span>
+        </div>
+        <div class="scp-header-right">
+            <div class="scp-opacity-wrap">
+                <button class="scp-hbtn" id="scp-opacity-btn" title="Window opacity">${I.opacity}</button>
+                <div class="scp-opacity-pop" id="scp-opacity-pop">
+                    <input type="range" id="scp-opacity-slider" min="20" max="100" value="95" class="scp-slider">
+                    <span id="scp-opacity-val">95%</span>
+                </div>
+            </div>
+            <button class="scp-hbtn" id="scp-min-btn" title="Minimize to icon">${I.minus}</button>
+            <button class="scp-hbtn scp-hbtn-close" id="scp-close-btn" title="Hide">${I.x}</button>
+        </div>
+    </div>
+
+    <div class="scp-toolbar">
+        <div class="scp-sess-wrap">
+            <div class="scp-sess-dropdown" id="scp-sess-dropdown">
+                <button class="scp-sess-trigger" id="scp-sess-trigger">
+                    <span class="scp-sess-trigger-name" id="scp-sess-name">Session</span>
+                    ${I.chevron}
+                </button>
+                <div class="scp-sess-panel" id="scp-sess-panel">
+                    <div class="scp-sess-list" id="scp-sess-list"></div>
+                    <div class="scp-sess-footer">
+                        <button class="scp-sess-new-btn" id="scp-new-sess-btn">
+                            ${I.plus}<span>New Session</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <button class="scp-tbtn" id="scp-rename-sess-btn" title="Rename session">${I.edit}</button>
+            <button class="scp-tbtn scp-tbtn-danger" id="scp-del-sess-btn" title="Delete session">${I.trash}</button>
+        </div>
+        <div class="scp-toolbar-sep"></div>
+        <label class="scp-depth-label" title="Main chat messages injected into each request">Ctx</label>
+        <input type="range" id="scp-depth-slider" class="scp-slider scp-depth-slider" min="0" max="100" step="1" value="15">
+        <span class="scp-depth-val scp-depth-clickable" id="scp-depth-val" title="Click to enter exact value">15</span>
+    </div>
+
+    <div class="scp-messages" id="scp-messages"></div>
+
+    <div class="scp-thinking-bar" id="scp-thinking-bar" style="display:none">
+        <div class="scp-dots"><span></span><span></span><span></span></div>
+        <span id="scp-thinking-text">Thinking…</span>
+        <button class="scp-stop-btn" id="scp-stop-btn" title="Abort">${I.stop}</button>
+    </div>
+
+    <div class="scp-actions-bar">
+        <button class="scp-action-btn" id="scp-inspect-btn" title="View raw context payload">${I.search}<span>Context</span></button>
+        <button class="scp-action-btn" id="scp-regen-btn" title="Regenerate last response">${I.refresh}<span>Regen</span></button>
+        <div class="scp-flex-grow"></div>
+        <span class="scp-token-count" id="scp-token-count" title="Estimated payload tokens"></span>
+        <span class="scp-msg-count" id="scp-msg-count"></span>
+    </div>
+
+    <div class="scp-input-row">
+        <textarea id="scp-input" class="scp-input" placeholder="Ask about the roleplay…" rows="1"></textarea>
+        <button class="scp-send-btn" id="scp-send-btn" title="Send (Enter)">${I.send}</button>
+    </div>
+</div>
+
+<div id="${ICON_ID}" class="scp-dock-icon" style="display:none" title="ST-Copilot — click to restore">
+    ${I.bot}<span class="scp-dock-pulse"></span>
+</div>
+
+<div id="${MODAL_ID}" class="scp-modal-overlay" style="display:none">
+    <div class="scp-modal">
+        <div class="scp-modal-header">
+            <span>${I.search} Raw Context Payload</span>
+            <button class="scp-hbtn scp-hbtn-close" id="scp-modal-close">${I.x}</button>
+        </div>
+        <div class="scp-modal-tabs">
+            <button class="scp-modal-tab active" data-tab="formatted">Formatted</button>
+            <button class="scp-modal-tab" data-tab="json">JSON</button>
+        </div>
+        <div class="scp-modal-body">
+            <pre id="scp-ctx-formatted" class="scp-ctx-pre"></pre>
+            <pre id="scp-ctx-json" class="scp-ctx-pre" style="display:none"></pre>
+        </div>
+        <div class="scp-modal-footer">
+            <button class="scp-action-btn" id="scp-ctx-copy-btn">${I.copy}<span>Copy</span></button>
+        </div>
+    </div>
+</div>`;
+    }
+
+    // ─── DOM References ─────────────────────────────────────────────────────────
+
+    let windowEl, iconEl, modalEl;
+
+    function injectUI() {
+        const root = document.createElement('div');
+        root.innerHTML = buildWindowHTML();
+        document.body.appendChild(root);
+        windowEl = document.getElementById(WIN_ID);
+        iconEl = document.getElementById(ICON_ID);
+        modalEl = document.getElementById(MODAL_ID);
+    }
+
+    function $(id) { return document.getElementById(id); }
+
+    // ─── Message Rendering ──────────────────────────────────────────────────────
+
+    function renderMarkdown(text) {
+        let out = text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+
+        const codeBlocks = [];
+        out = out.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+            const i = codeBlocks.length;
+            codeBlocks.push(`<pre class="scp-code-block${lang ? ` lang-${lang}` : ''}"><code>${code.trim()}</code></pre>`);
+            return `\x00B${i}\x00`;
+        });
+
+        out = out.replace(/`([^`\n]+)`/g, '<code class="scp-inline-code">$1</code>');
+
+        const lines = out.split('\n');
+        const output =[];
+        let listItems = [];
+        let tableRows = [];
+        let bqLines =[];
+
+        const flushList = () => {
+            if (!listItems.length) return;
+            output.push(`<ul class="scp-list">${listItems.map(li => `<li>${li}</li>`).join('')}</ul>`);
+            listItems =[];
+        };
+        const flushTable = () => {
+            if (!tableRows.length) return;
+            output.push(`<div class="scp-table-wrap"><table class="scp-table"><tbody>${tableRows.join('')}</tbody></table></div>`);
+            tableRows =[];
+        };
+        const flushBq = () => {
+            if (!bqLines.length) return;
+            output.push(`<blockquote class="scp-blockquote">${bqLines.join('<br>')}</blockquote>`);
+            bqLines =[];
+        };
+
+        for (const line of lines) {
+            const trLine = line.trim();
+
+            if (/^(---+|\*\*\*+|___+)$/.test(trLine)) {
+                flushList(); flushTable(); flushBq();
+                output.push(`<hr class="scp-hr">`);
+                continue;
+            }
+
+            const hm = line.match(/^(#{1,6})\s+(.+)/);
+            if (hm) { flushList(); flushTable(); flushBq(); output.push(`<span class="scp-h${hm[1].length}">${hm[2]}</span>`); continue; }
+
+            const bq = line.match(/^&gt;\s*(.*)/);
+            if (bq) { flushList(); flushTable(); bqLines.push(bq[1]); continue; }
+
+            const lm = line.match(/^[*\-+]\s+(.+)/);
+            if (lm && !/^(---+|\*\*\*+|___+)$/.test(trLine)) { flushTable(); flushBq(); listItems.push(lm[1]); continue; }
+
+            const tm = line.match(/^\|(.*)\|$/);
+            if (tm) {
+                flushList(); flushBq();
+                if (/^[|\s\-:]+$/.test(trLine)) continue;
+                const cells = tm[1].split('|').map(c => c.trim());
+                const tag = tableRows.length === 0 ? 'th' : 'td';
+                tableRows.push(`<tr>${cells.map(c => `<${tag}>${c}</${tag}>`).join('')}</tr>`);
+                continue;
+            }
+
+            flushList(); flushTable(); flushBq();
+            output.push(line);
+        }
+        flushList(); flushTable(); flushBq();
+
+        out = output.join('\n');
+        out = out.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+        out = out.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        out = out.replace(/\*(\S(?:[^*\n]*?\S)?)\*/g, '<em>$1</em>');
+
+        out = out.replace(/(<(?:ul|pre)\b[^>]*>[\s\S]*?<\/(?:ul|pre)>)|\n/g,
+            (m, block) => block || '<br>');
+        
+        out = out.replace(/(?:<br>\s*)*(<hr class="scp-hr">)(?:\s*<br>)*/g, '$1');
+        out = out.replace(/(?:<br>\s*)*(<div class="scp-table-wrap">|<\/div>|<blockquote class="scp-blockquote">|<\/blockquote>)(?:\s*<br>)*/g, '$1');
+
+        out = out.replace(/\x00B(\d+)\x00/g, (_, i) => codeBlocks[+i]);
+
+        return out;
+    }
+
+    function createMsgEl(msg, onCopy, onEdit, onDelete, onRegen) {
+        const isUser = msg.role === 'user';
+        const wrap = document.createElement('div');
+        wrap.className = `scp-msg ${isUser ? 'scp-msg-user' : 'scp-msg-assistant'}`;
+        wrap.dataset.id = msg.id;
+
+        const avatar = document.createElement('div');
+        avatar.className = 'scp-msg-avatar';
+        avatar.innerHTML = isUser ? I.user : I.bot;
+
+        const body = document.createElement('div');
+        body.className = 'scp-msg-body';
+
+        const content = document.createElement('div');
+        content.className = 'scp-msg-content';
+        content.innerHTML = renderMarkdown(msg.content);
+
+        const meta = document.createElement('div');
+        meta.className = 'scp-msg-meta';
+        meta.textContent = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        const actions = document.createElement('div');
+        actions.className = 'scp-msg-actions';
+
+        const makeBtn = (icon, label, cls, cb) => {
+            const b = document.createElement('button');
+            b.className = `scp-msg-btn${cls ? ' ' + cls : ''}`;
+            b.innerHTML = icon; b.title = label;
+            b.addEventListener('click', cb);
+            return b;
+        };
+
+        actions.appendChild(makeBtn(I.copy, 'Copy', '', () => onCopy(msg)));
+        actions.appendChild(makeBtn(I.edit, 'Edit', '', () => onEdit(wrap, msg)));
+        actions.appendChild(makeBtn(I.refresh, 'Regen', '', () => onRegen(wrap, msg)));
+        actions.appendChild(makeBtn(I.trash, 'Delete', 'scp-msg-btn-danger', () => onDelete(wrap, msg)));
+
+        body.appendChild(content); body.appendChild(actions); body.appendChild(meta);
+        wrap.appendChild(avatar); wrap.appendChild(body);
+        return wrap;
+    }
+
+    function scrollToBottom() { const c = $('scp-messages'); if (c) c.scrollTop = c.scrollHeight; }
+
+    function renderSession(session) {
+        const c = $('scp-messages');
+        if (!c) return;
+        c.innerHTML = '';
+        if (!session.messages.length) {
+            c.innerHTML = `
+                <div class="scp-empty-state">
+                    <div class="scp-empty-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><circle cx="8.5" cy="16" r="1" fill="currentColor"/><circle cx="15.5" cy="16" r="1" fill="currentColor"/></svg>
+                    </div>
+                    <div class="scp-empty-title">New Session</div>
+                    <div class="scp-empty-sub">Ask anything about your roleplay — continuity checks, character analysis, writing feedback, worldbuilding, and more.</div>
+                </div>`;
+            updateMsgCount(session);
+            return;
+        }
+        for (const msg of session.messages) c.appendChild(createMsgEl(msg, handleCopy, handleEdit, handleDelete, handleMessageRegen));
+        updateMsgCount(session);
+        scrollToBottom();
+    }
+
+    function appendMsgEl(msg) {
+        const c = $('scp-messages');
+        if (!c) return;
+        // Remove empty state if present
+        c.querySelector('.scp-empty-state')?.remove();
+        c.appendChild(createMsgEl(msg, handleCopy, handleEdit, handleDelete, handleMessageRegen));
+        updateMsgCount(getCurrentSession());
+        scrollToBottom();
+    }
+
+    function removeMsgEl(msgId) { document.querySelector(`.scp-msg[data-id="${msgId}"]`)?.remove(); }
+
+    function removeMsgElAndBelow(msgId) {
+        const c = $('scp-messages'); if (!c) return;
+        let found = false;
+        for (const el of [...c.querySelectorAll('.scp-msg')]) {
+            if (el.dataset.id === msgId) found = true;
+            if (found) el.remove();
+        }
+    }
+
+    function removeMsgElAfter(msgId) {
+        const c = $('scp-messages'); if (!c) return;
+        let found = false;
+        for (const el of [...c.querySelectorAll('.scp-msg')]) {
+            if (found) el.remove();
+            if (el.dataset.id === msgId) found = true;
+        }
+    }
+
+    let _tokenCalcTid = null;
+
+    async function estimateTokens(text) {
+        if (!text) return 0;
+        const ctx = SillyTavern.getContext();
+        try {
+            if (typeof ctx.getTokenCount === 'function') return ctx.getTokenCount(text);
+            if (typeof window.getTokenCount === 'function') return window.getTokenCount(text);
+        } catch (_) {}
+        try {
+            const res = await fetch('/api/tokencount', {
+                method: 'POST',
+                headers: { ...ctx.getRequestHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (typeof data.length === 'number') return data.length;
+                if (typeof data.count === 'number') return data.count;
+                if (typeof data === 'number') return data;
+            }
+        } catch (_) {}
+        return Math.ceil(text.length / 3.5);
+    }
+
+    function updateMsgCount(session) {
+        const el = $('scp-msg-count');
+        if (el && session) el.textContent = `${session.messages.length} msgs`;
+        
+        const tel = $('scp-token-count');
+        if (tel && session) {
+            clearTimeout(_tokenCalcTid);
+            tel.textContent = '... tkns';
+            _tokenCalcTid = setTimeout(async () => {
+                const settings = getSettings();
+                const messages = assembleMessages(session, settings, null);
+                const fullText = messages.map(m => m.content).join('\n');
+                const count = await estimateTokens(fullText);
+                if (tel) tel.textContent = `~${count} tkns`;
+            }, 600);
+        }
+    }
+
+    function getCurrentSession() {
+        const { charId, chatId } = getBindingKey();
+        return getActiveSession(charId, chatId);
+    }
+
+    // ─── Clipboard Helper ────────────────────────────────────────────────────────
+
+    function fallbackCopy(text) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0;width:1px;height:1px;';
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        try { document.execCommand('copy'); toastr.success('Copied', EXT_DISPLAY); }
+        catch (e) { toastr.error('Copy failed', EXT_DISPLAY); }
+        ta.remove();
+    }
+
+    function copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text)
+                .then(() => toastr.success('Copied', EXT_DISPLAY))
+                .catch(() => fallbackCopy(text));
+        } else { fallbackCopy(text); }
+    }
+
+    // ─── Message Interaction Handlers ───────────────────────────────────────────
+
+    function handleCopy(msg) { copyText(msg.content); }
+
+    function handleEdit(wrapEl, msg) {
+        if (wrapEl.classList.contains('is-editing')) return;
+        wrapEl.classList.add('is-editing');
+        const { charId, chatId } = getBindingKey();
+        const session = getActiveSession(charId, chatId);
+        const contentEl = wrapEl.querySelector('.scp-msg-content');
+        const original = msg.content;
+
+        const ta = document.createElement('textarea');
+        ta.className = 'scp-edit-ta';
+        ta.value = original;
+
+        const row = document.createElement('div');
+        row.className = 'scp-edit-actions';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'scp-edit-btn scp-edit-save';
+        // Only show "Save & Resend" for user messages; just "Save" for assistant
+        saveBtn.innerHTML = msg.role === 'user'
+            ? `${I.check}<span>Save & Resend</span>`
+            : `${I.check}<span>Save</span>`;
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'scp-edit-btn scp-edit-cancel';
+        cancelBtn.innerHTML = `${I.x}<span>Cancel</span>`;
+
+        row.appendChild(saveBtn); row.appendChild(cancelBtn);
+        contentEl.replaceWith(ta);
+        wrapEl.querySelector('.scp-msg-actions').after(row);
+        ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+        autoResize(ta); ta.addEventListener('input', () => autoResize(ta));
+
+        cancelBtn.addEventListener('click', () => {
+            const nc = document.createElement('div');
+            nc.className = 'scp-msg-content';
+            nc.innerHTML = renderMarkdown(original);
+            ta.replaceWith(nc); row.remove(); wrapEl.classList.remove('is-editing');
+        });
+
+        saveBtn.addEventListener('click', async () => {
+            const rawText = ta.value.trim();
+            if (!rawText) return;
+            const newText = expandMacros(rawText);  // expand macros before storing
+            updateMessage(session, msg.id, newText);
+            msg.content = newText;
+            const nc = document.createElement('div');
+            nc.className = 'scp-msg-content';
+            nc.innerHTML = renderMarkdown(newText);
+            ta.replaceWith(nc); row.remove(); wrapEl.classList.remove('is-editing');
+            truncateAfter(session, msg.id);
+            removeMsgElAfter(msg.id);
+            if (msg.role === 'user') await runGenerate(session, newText, false);
+        });
+    }
+
+    async function handleMessageRegen(wrapEl, msg) {
+        if (_generating) return;
+        const { charId, chatId } = getBindingKey();
+        const session = getActiveSession(charId, chatId);
+        const idx = session.messages.findIndex(m => m.id === msg.id);
+        if (idx === -1) return;
+
+        const isUser = msg.role === 'user';
+        const msgsAfter = session.messages.length - 1 - idx;
+        
+        let needsConfirm = false;
+        if (isUser) {
+            if (msgsAfter > 1 || (msgsAfter === 1 && session.messages[idx + 1].role !== 'assistant')) {
+                needsConfirm = true;
+            }
+        } else {
+            if (msgsAfter > 0) {
+                needsConfirm = true;
+            }
+        }
+
+        if (needsConfirm) {
+            const ok = await showCustomDialog({
+                type: 'confirm',
+                title: 'Regenerate Message',
+                message: 'Regenerating will delete all subsequent messages. Continue?'
+            });
+            if (!ok) return;
+        }
+
+        if (isUser) {
+            truncateAfter(session, msg.id);
+            removeMsgElAfter(msg.id);
+        } else {
+            truncateFrom(session, msg.id);
+            removeMsgElAndBelow(msg.id);
+        }
+        
+        updateMsgCount(session);
+        runGenerate(session, null, false);
+    }
+
+    async function handleDelete(wrapEl, msg) {
+        const isUser = msg.role === 'user';
+        const confirmed = await showCustomDialog({
+            type: 'confirm',
+            title: 'Delete Message',
+            message: isUser
+                ? 'Delete this message and all subsequent messages?'
+                : 'Delete this assistant message?',
+        });
+        if (!confirmed) return;
+        const { charId, chatId } = getBindingKey();
+        const session = getActiveSession(charId, chatId);
+        if (isUser) {
+            truncateFrom(session, msg.id);
+            removeMsgElAndBelow(msg.id);
+        } else {
+            deleteMsg(session, msg.id);
+            removeMsgEl(msg.id);
+        }
+        updateMsgCount(session);
+        // Show empty state if no messages left
+        if (!session.messages.length) renderSession(session);
+    }
+
+    // ─── Generation Flow ────────────────────────────────────────────────────────
+
+    let _generating = false;
+
+    async function runGenerate(session, userText, addUserMsg = true) {
+        if (_generating) return;
+        _generating = true;
+        const settings = getSettings();
+        setGeneratingState(true);
+        let userMsg = null;
+        try {
+            if (addUserMsg && userText) { 
+                userMsg = addMessage(session, 'user', userText); 
+                appendMsgEl(userMsg); 
+            }
+            const result = await callGenerate(session, settings, userText);
+            if (result === null) return;
+            appendMsgEl(addMessage(session, 'assistant', result));
+        } catch (err) {
+            console.error(`[${EXT_DISPLAY}]`, err);
+            toastr.error(`Generation failed: ${err.message}`, EXT_DISPLAY);
+        } finally { 
+            _generating = false; 
+            setGeneratingState(false); 
+        }
+    }
+
+    function setGeneratingState(on) {
+        const bar = $('scp-thinking-bar'), sendBtn = $('scp-send-btn'),
+              input = $('scp-input'), regenBtn = $('scp-regen-btn');
+        if (bar) bar.style.display = on ? 'flex' : 'none';
+        if (sendBtn) sendBtn.disabled = on;
+        if (input) input.disabled = on;
+        if (regenBtn) regenBtn.disabled = on;
+    }
+
+    function handleSend() {
+        const input = $('scp-input'); if (!input) return;
+        const rawText = input.value.trim();
+        if (!rawText || _generating) return;
+        const text = expandMacros(rawText);  // expand {{user}}, {{char}}, etc.
+        input.value = ''; autoResize(input);
+        runGenerate(getCurrentSession(), text, true);
+    }
+
+    function handleRegen() {
+        if (_generating) return;
+        const sess = getCurrentSession(); if (!sess.messages.length) return;
+        let lastUserIdx = -1;
+        for (let i = sess.messages.length - 1; i >= 0; i--) {
+            if (sess.messages[i].role === 'user') { lastUserIdx = i; break; }
+        }
+        if (lastUserIdx === -1) return;
+        const userMsg = sess.messages[lastUserIdx];
+        truncateAfter(sess, userMsg.id); removeMsgElAfter(userMsg.id);
+        runGenerate(sess, userMsg.content, false);
+    }
+
+    // ─── Context Inspector ──────────────────────────────────────────────────────
+
+    function openInspector() {
+        const sess = getCurrentSession(); const settings = getSettings();
+        const messages = assembleMessages(sess, settings, null);
+        const fmtEl = $('scp-ctx-formatted'); const jsonEl = $('scp-ctx-json');
+        if (fmtEl) fmtEl.textContent = formatPayloadAsText(messages);
+        if (jsonEl) jsonEl.textContent = JSON.stringify(messages, null, 2);
+        modalEl.style.display = 'flex';
+    }
+
+    // ─── Drag & Resize ──────────────────────────────────────────────────────────
+
+    function makeDraggable(handle, target) {
+        let active = false, ox = 0, oy = 0, sl = 0, st = 0;
+        handle.addEventListener('mousedown', e => {
+            if (e.target.closest('.scp-hbtn,.scp-tbtn,select,input,button,.scp-opacity-wrap,.scp-rh,.scp-sess-dropdown,.scp-sess-wrap')) return;
+            active = true;
+            const r = target.getBoundingClientRect(); ox = e.clientX; oy = e.clientY; sl = r.left; st = r.top;
+            document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+            e.preventDefault();
+        });
+        const onMove = e => { if (!active) return; target.style.left = `${Math.max(0, sl + (e.clientX - ox))}px`; target.style.top = `${Math.max(0, st + (e.clientY - oy))}px`; target.style.right = 'auto'; target.style.bottom = 'auto'; };
+        const onUp = () => { active = false; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); saveWindowState(); };
+    }
+
+    function makeResizable(target) {
+        target.querySelectorAll('.scp-rh').forEach(h => {
+            h.addEventListener('mousedown', e => {
+                e.preventDefault(); e.stopPropagation();
+                const dir = [...h.classList].find(c => /^scp-rh-\w/.test(c))?.replace('scp-rh-', '') || '';
+                const sx = e.clientX, sy = e.clientY, r = target.getBoundingClientRect();
+                const sw = r.width, sh = r.height, sl = r.left, st = r.top, MIN_W = 320, MIN_H = 300;
+                const onMove = me => {
+                    const dx = me.clientX - sx, dy = me.clientY - sy;
+                    if (dir.includes('e')) target.style.width = `${Math.max(MIN_W, sw + dx)}px`;
+                    if (dir.includes('s')) target.style.height = `${Math.max(MIN_H, sh + dy)}px`;
+                    if (dir.includes('w')) { const nw = Math.max(MIN_W, sw - dx); target.style.width = `${nw}px`; target.style.left = `${sl + (sw - nw)}px`; }
+                    if (dir.includes('n')) { const nh = Math.max(MIN_H, sh - dy); target.style.height = `${nh}px`; target.style.top = `${st + (sh - nh)}px`; }
+                };
+                const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); saveWindowState(); };
+                document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+            });
+        });
+    }
+
+    function makeIconDraggable(iconTarget) {
+        let active = false, moved = false, ox = 0, oy = 0, sl = 0, st = 0;
+        iconTarget.addEventListener('mousedown', e => {
+            if (e.button !== 0) return;
+            active = true; moved = false;
+            const r = iconTarget.getBoundingClientRect();
+            ox = e.clientX; oy = e.clientY; sl = r.left; st = r.top;
+            document.addEventListener('mousemove', onMove); 
+            document.addEventListener('mouseup', onUp);
+            e.preventDefault();
+        });
+        const onMove = e => {
+            if (!active) return;
+            const dx = e.clientX - ox; const dy = e.clientY - oy;
+            // Порог в 3 пикселя, чтобы отличить клик от сдвига
+            if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+            if (moved) {
+                iconTarget.style.left = `${Math.max(0, Math.min(sl + dx, window.innerWidth - 40))}px`;
+                iconTarget.style.top = `${Math.max(0, Math.min(st + dy, window.innerHeight - 40))}px`;
+                iconTarget.style.right = 'auto'; iconTarget.style.bottom = 'auto';
+            }
+        };
+        const onUp = () => {
+            active = false;
+            document.removeEventListener('mousemove', onMove); 
+            document.removeEventListener('mouseup', onUp);
+            if (moved) {
+                const s = getSettings();
+                const r = iconTarget.getBoundingClientRect();
+                s.iconX = r.left; s.iconY = r.top;
+                saveSettings();
+            } else {
+                restoreFromMinimize(); 
+            }
+        };
+    }
+
+    // ─── Theme ──────────────────────────────────────────────────────────────────
+
+    function applyCustomTheme(theme) {
+        if (!windowEl || !theme) return;
+        for (const [key, cssVar] of Object.entries(THEME_CSS_MAP)) {
+            if (theme[key] !== undefined && theme[key] !== '') {
+                windowEl.style.setProperty(cssVar, theme[key]);
+            }
+        }
+        // Font handled separately
+        if (theme.font) windowEl.style.setProperty('--scp-font', theme.font);
+    }
+
+    // ─── Window State ───────────────────────────────────────────────────────────
+
+    function saveWindowState() {
+        const s = getSettings(); if (!windowEl) return;
+        const r = windowEl.getBoundingClientRect();
+        s.windowX = r.left; s.windowY = r.top; s.windowW = r.width; s.windowH = r.height;
+        saveSettings();
+    }
+
+    function restoreWindowState() {
+        const s = getSettings(); if (!windowEl) return;
+        if (s.windowX !== null) {
+            windowEl.style.left = `${Math.max(0, Math.min(s.windowX, window.innerWidth - 200))}px`;
+            windowEl.style.top = `${Math.max(0, Math.min(s.windowY, window.innerHeight - 100))}px`;
+            windowEl.style.right = 'auto';
+        }
+        if (iconEl && s.iconX !== null && s.iconY !== null) {
+            iconEl.style.left = `${Math.max(0, Math.min(s.iconX, window.innerWidth - 40))}px`;
+            iconEl.style.top = `${Math.max(0, Math.min(s.iconY, window.innerHeight - 40))}px`;
+            iconEl.style.right = 'auto';
+            iconEl.style.bottom = 'auto';
+        }
+        windowEl.style.width = `${s.windowW || 440}px`;
+        windowEl.style.height = `${s.windowH || 600}px`;
+        windowEl.style.opacity = ((s.opacity || 95) / 100).toString();
+        applyCustomTheme(s.customTheme || THEME_PRESETS.default);
+    }
+
+    // ─── Visibility ─────────────────────────────────────────────────────────────
+
+    function minimize() { const s = getSettings(); s.minimized = true; windowEl.style.display = 'none'; iconEl.style.display = 'flex'; saveSettings(); }
+    function restoreFromMinimize() { const s = getSettings(); s.minimized = false; windowEl.style.display = 'flex'; iconEl.style.display = 'none'; saveSettings(); scrollToBottom(); }
+    function hideWindow() { const s = getSettings(); s.windowVisible = false; s.minimized = false; windowEl.style.display = 'none'; iconEl.style.display = 'none'; saveSettings(); }
+    function showWindow() {
+        const s = getSettings(); s.windowVisible = true;
+        if (s.minimized) { iconEl.style.display = 'flex'; windowEl.style.display = 'none'; }
+        else { windowEl.style.display = 'flex'; iconEl.style.display = 'none'; }
+        saveSettings(); scrollToBottom();
+    }
+    function toggleVisibility() {
+        const s = getSettings();
+        if (!s.windowVisible) { showWindow(); return; }
+        if (s.minimized) { restoreFromMinimize(); return; }
+        minimize();
+    }
+
+    // ─── Hotkey ─────────────────────────────────────────────────────────────────
+
+    let _hotkeyHandler = null;
+
+    function setupHotkey() {
+        if (_hotkeyHandler) document.removeEventListener('keydown', _hotkeyHandler);
+        const s = getSettings();
+        if (!s.hotkeyEnabled || !s.hotkey) return;
+        const parts = s.hotkey.toLowerCase().split('+').map(p => p.trim());
+        const key = parts[parts.length - 1];
+        const needAlt = parts.includes('alt'), needCtrl = parts.includes('ctrl') || parts.includes('control');
+        const needShift = parts.includes('shift'), needMeta = parts.includes('meta') || parts.includes('cmd');
+        _hotkeyHandler = e => {
+            if (e.key.toLowerCase() !== key) return;
+            if (needAlt !== e.altKey || needCtrl !== e.ctrlKey || needShift !== e.shiftKey || needMeta !== e.metaKey) return;
+            const active = document.activeElement;
+            if (active && active !== $('scp-input') && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) return;
+            e.preventDefault(); toggleVisibility();
+        };
+        document.addEventListener('keydown', _hotkeyHandler);
+    }
+
+    // ─── Session Dropdown ────────────────────────────────────────────────────────
+
+    function closeSessPanel() {
+        $('scp-sess-panel')?.classList.remove('open');
+        $('scp-sess-trigger')?.classList.remove('open');
+    }
+
+    function refreshSessionDropdown() {
+        const { charId, chatId } = getBindingKey();
+        const bucket = getChatBucket(charId, chatId);
+        const nameEl = $('scp-sess-name'); const listEl = $('scp-sess-list');
+        if (!nameEl || !listEl) return;
+        const activeSess = bucket.sessions.find(s => s.id === bucket.activeSessionId);
+        nameEl.textContent = activeSess?.name || 'No Sessions';
+        listEl.innerHTML = '';
+        if (!bucket.sessions.length) {
+            listEl.innerHTML = `<div class="scp-sess-empty-label">No sessions — create one below</div>`;
+            return;
+        }
+        for (const sess of bucket.sessions) {
+            const item = document.createElement('div');
+            item.className = `scp-sess-item${sess.id === bucket.activeSessionId ? ' active' : ''}`;
+            item.dataset.id = sess.id;
+            item.innerHTML = `
+                <span class="scp-sess-item-dot"></span>
+                <span class="scp-sess-item-name">${escHtml(sess.name)}</span>
+                <span class="scp-sess-item-count">${sess.messages.length}</span>`;
+            item.addEventListener('click', () => {
+                setActiveSession(charId, chatId, sess.id);
+                refreshSessionDropdown(); renderSession(getCurrentSession()); closeSessPanel();
+            });
+            listEl.appendChild(item);
+        }
+    }
+
+    // ─── Depth Slider Click-to-Type ──────────────────────────────────────────────
+
+    function setupDepthClickEdit() {
+        const valEl = $('scp-depth-val'); if (!valEl) return;
+        valEl.addEventListener('click', () => {
+            const cur = getSettings().contextDepth;
+            const input = document.createElement('input');
+            input.type = 'number'; input.className = 'scp-depth-input';
+            input.value = cur; input.min = 0;
+            const el = $('scp-depth-val');
+            if (!el) return;
+            el.replaceWith(input); input.focus(); input.select();
+            const commit = () => {
+                const val = Math.max(0, parseInt(input.value) || 0);
+                getSettings().contextDepth = val; saveSettings();
+                const span = document.createElement('span');
+                span.className = 'scp-depth-val scp-depth-clickable'; span.id = 'scp-depth-val';
+                span.title = 'Click to enter exact value'; span.textContent = val;
+                input.replaceWith(span);
+                setupDepthClickEdit();
+                const slider = $('scp-depth-slider');
+                if (slider) { slider.value = Math.min(100, val); }
+                updateMsgCount(getCurrentSession());
+            };
+            input.addEventListener('blur', commit);
+            input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } if (e.key === 'Escape') commit(); });
+        });
+    }
+
+    // ─── Profile System ─────────────────────────────────────────────────────────
+
+    function saveProfile(name) {
+        const s = getSettings();
+        s.profiles[name] = {
+            systemPrompt: s.systemPrompt, includeSystemPrompt: s.includeSystemPrompt,
+            includeAuthorsNote: s.includeAuthorsNote, includeCharacterCard: s.includeCharacterCard,
+            includeUserPersonality: s.includeUserPersonality, contextDepth: s.contextDepth,
+            localHistoryLimit: s.localHistoryLimit, customTheme: { ...s.customTheme },
+            connectionSource: s.connectionSource, connectionProfileId: s.connectionProfileId,
+            maxTokens: s.maxTokens,
+        };
+        s.activeProfile = name; saveSettings();
+    }
+
+    function loadProfile(name) {
+        const s = getSettings(); const p = s.profiles[name]; if (!p) return;
+        Object.assign(s, p); s.activeProfile = name;
+        if (p.customTheme) applyCustomTheme(p.customTheme);
+        saveSettings();
+    }
+
+    function deleteProfile(name) {
+        const s = getSettings(); delete s.profiles[name];
+        if (s.activeProfile === name) s.activeProfile = '';
+        for (const k in s.profileBindings) { if (s.profileBindings[k] === name) delete s.profileBindings[k]; }
+        saveSettings();
+    }
+
+    function refreshProfilesDropdown() {
+        const sel = $('scp-profile-select'); if (!sel) return;
+        const s = getSettings();
+        sel.innerHTML = '<option value="">-- No Configuration --</option>';
+        for (const name of Object.keys(s.profiles)) {
+            const opt = document.createElement('option');
+            opt.value = name; opt.textContent = name;
+            opt.selected = name === s.activeProfile;
+            sel.appendChild(opt);
+        }
+        updateBindingSection();
+    }
+
+    function updateBindingSection() {
+        const sel = $('scp-profile-select'); const section = $('scp-binding-section');
+        if (!section) return;
+        const hasProfile = sel?.value;
+        section.style.display = hasProfile ? '' : 'none';
+        if (!hasProfile) return;
+        const s = getSettings(); const { charId, chatId } = getBindingKey();
+        const charKey = `char_${charId}`; const chatKey = `chat_${charId}_${chatId}`;
+        const charBtn = $('scp-bind-char'); const chatBtn = $('scp-bind-chat');
+        if (charBtn) charBtn.classList.toggle('active', s.profileBindings[charKey] === sel.value);
+        if (chatBtn) chatBtn.classList.toggle('active', s.profileBindings[chatKey] === sel.value);
+    }
+
+    function autoLoadBoundProfile() {
+        const s = getSettings(); const { charId, chatId } = getBindingKey();
+        const name = s.profileBindings[`chat_${charId}_${chatId}`] || s.profileBindings[`char_${charId}`];
+        if (name && s.profiles[name]) {
+            loadProfile(name);
+            const sel = $('scp-profile-select'); if (sel) sel.value = name;
+        }
+    }
+
+    // ─── Theme Editor ────────────────────────────────────────────────────────────
+
+    function buildThemeEditor() {
+        const container = $('scp-theme-section'); if (!container) return;
+        container.innerHTML = '';
+        const s = getSettings();
+
+        // Saved Themes Dropdown
+        const profileRow = document.createElement('div');
+        profileRow.className = 'scp-profile-bar';
+        profileRow.style.marginBottom = '12px';
+        profileRow.innerHTML = `
+            <select id="scp-theme-profile-select">
+                <option value="">-- Unsaved Theme --</option>
+            </select>
+            <button class="scp-profile-icon-btn" id="scp-theme-save-new" title="Save current theme">
+                <i class="fa-solid fa-floppy-disk"></i>
+            </button>
+            <button class="scp-profile-icon-btn danger" id="scp-theme-delete" title="Delete selected theme">
+                <i class="fa-solid fa-trash"></i>
+            </button>
+        `;
+        container.appendChild(profileRow);
+
+        const sel = profileRow.querySelector('#scp-theme-profile-select');
+        for (const name of Object.keys(s.savedThemes || {})) {
+            const opt = document.createElement('option');
+            opt.value = name; opt.textContent = name;
+            opt.selected = name === s.activeThemeProfile;
+            sel.appendChild(opt);
+        }
+
+        sel.addEventListener('change', () => {
+            const name = sel.value;
+            if (name && s.savedThemes[name]) {
+                s.customTheme = { ...s.savedThemes[name] };
+                s.activeThemeProfile = name;
+                saveSettings(); applyCustomTheme(s.customTheme); buildThemeEditor();
+            }
+        });
+
+        profileRow.querySelector('#scp-theme-save-new').addEventListener('click', async () => {
+            const name = await showCustomDialog({ type: 'prompt', title: 'Save Theme', message: 'Enter name for theme:', placeholder: 'My Theme' });
+            if (!name?.trim()) return;
+            if (!s.savedThemes) s.savedThemes = {};
+            s.savedThemes[name.trim()] = { ...s.customTheme };
+            s.activeThemeProfile = name.trim();
+            saveSettings(); buildThemeEditor(); toastr.success(`Saved theme "${name.trim()}"`, EXT_DISPLAY);
+        });
+
+        profileRow.querySelector('#scp-theme-delete').addEventListener('click', async () => {
+            const val = sel.value; if (!val) return;
+            const ok = await showCustomDialog({ type: 'confirm', title: 'Delete Theme', message: `Delete "${val}"?` });
+            if (!ok) return;
+            delete s.savedThemes[val];
+            if (s.activeThemeProfile === val) s.activeThemeProfile = '';
+            saveSettings(); buildThemeEditor(); toastr.success('Deleted.', EXT_DISPLAY);
+        });
+
+        // Preset pills
+        const presetRow = document.createElement('div');
+        presetRow.className = 'scp-theme-preset-row';
+        presetRow.innerHTML = '<div class="scp-theme-preset-label">Base preset</div><div class="scp-theme-preset-btns" id="scp-theme-preset-btns"></div>';
+        container.appendChild(presetRow);
+        const btnsEl = presetRow.querySelector('#scp-theme-preset-btns');
+        for (const [name, preset] of Object.entries(THEME_PRESETS)) {
+            const btn = document.createElement('button');
+            btn.className = 'scp-preset-pill'; btn.textContent = preset.label; btn.dataset.preset = name;
+            btn.addEventListener('click', () => {
+                const s2 = getSettings();
+                s2.customTheme = { ...THEME_PRESETS[name] };
+                s2.activeThemeProfile = '';
+                saveSettings(); applyCustomTheme(s2.customTheme); buildThemeEditor();
+            });
+            btnsEl.appendChild(btn);
+        }
+
+        // Variable grid
+        const grid = document.createElement('div'); grid.className = 'scp-theme-var-grid';
+        for (const def of THEME_VAR_DEFS) {
+            const item = document.createElement('div'); item.className = 'scp-theme-var-item';
+            const label = document.createElement('div'); label.className = 'scp-theme-var-label'; label.textContent = def.label;
+            const wrap = document.createElement('div'); wrap.className = 'scp-theme-var-wrap';
+            const preview = document.createElement('div'); preview.className = 'scp-theme-var-preview';
+            const curVal = s.customTheme?.[def.key] ?? '';
+            preview.style.background = curVal; preview.style.display = curVal ? '' : 'none';
+            const input = document.createElement('input'); input.type = 'text'; input.className = 'scp-theme-var-input';
+            input.value = curVal; input.placeholder = def.hint; input.dataset.key = def.key;
+            input.addEventListener('input', () => {
+                const s2 = getSettings(); if (!s2.customTheme) s2.customTheme = {};
+                s2.customTheme[def.key] = input.value; s2.activeThemeProfile = ''; saveSettings();
+                applyCustomTheme(s2.customTheme);
+                preview.style.background = input.value; preview.style.display = input.value ? '' : 'none';
+                sel.value = '';
+            });
+            wrap.appendChild(preview); wrap.appendChild(input);
+            item.appendChild(label); item.appendChild(wrap); grid.appendChild(item);
+        }
+        container.appendChild(grid);
+    }
+
+    // ─── char Badge ─────────────────────────────────────────────────────────────
+
+    function updateCharBadge() {
+        const badge = $('scp-char-badge'); if (!badge) return;
+        const ctx = SillyTavern.getContext(); const char = ctx.characters?.[ctx.characterId];
+        if (char) { badge.textContent = char.name; badge.style.display = ''; }
+        else { badge.style.display = 'none'; }
+    }
+
+    async function updateProfilesList() {
+        const profSel = $('scp-conn-profile'); if (!profSel) return;
+        const s = getSettings(); const currentVal = s.connectionProfileId || '';
+        profSel.innerHTML = '<option value="">-- Select Profile --</option>';
+        
+        const ctx = SillyTavern.getContext();
+        let profiles =[];
+        try {
+            if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
+                const result = await ctx.executeSlashCommandsWithOptions('/profile-list');
+                if (result && result.pipe) profiles = JSON.parse(result.pipe);
+            }
+        } catch (e) {
+            console.warn(`[${EXT_DISPLAY}] Failed to fetch profiles via slash command`, e);
+        }
+
+        if (profiles && profiles.length > 0) {
+            profiles.forEach(p => {
+                const newOpt = document.createElement('option');
+                newOpt.value = p;
+                newOpt.textContent = p;
+                profSel.appendChild(newOpt);
+            });
+        } else {
+            const nativeSel = document.getElementById('connection_profile');
+            if (nativeSel?.options) {
+                for (const opt of Array.from(nativeSel.options)) {
+                    if (opt.value && opt.value !== 'default' && opt.value !== 'gui') {
+                        const newOpt = document.createElement('option');
+                        const profileName = opt.textContent.trim();
+                        newOpt.value = profileName;
+                        newOpt.textContent = profileName;
+                        profSel.appendChild(newOpt);
+                    }
+                }
+            }
+        }
+        if (Array.from(profSel.options).some(o => o.value === currentVal)) profSel.value = currentVal;
+    }
+
+    // ─── Auto-resize textarea ───────────────────────────────────────────────────
+
+    function autoResize(el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 180)}px`; }
+
+    // ─── Settings Panel Handlers ─────────────────────────────────────────────────
+
+    function setupSettingsHandlers() {
+        const s = getSettings();
+
+        const updCtx = () => updateMsgCount(getCurrentSession());
+
+        const bindCheck = (id, key, cb) => {
+            const el = $(id); if (!el) return;
+            el.checked = !!s[key];
+            el.addEventListener('change', () => { getSettings()[key] = el.checked; saveSettings(); if (cb) cb(); });
+        };
+        const bindInput = (id, key, toVal, cb) => {
+            const el = $(id); if (!el) return;
+            el.value = s[key] ?? '';
+            el.addEventListener('input', () => { getSettings()[key] = toVal ? toVal(el.value) : el.value; saveSettings(); if (cb) cb(); });
+        };
+        const bindSelect = (id, key, cb) => {
+            const el = $(id); if (!el) return;
+            el.value = s[key] ?? '';
+            el.addEventListener('change', () => { getSettings()[key] = el.value; saveSettings(); if (cb) cb(el.value); });
+        };
+
+        bindCheck('scp-enabled', 'enabled');
+        bindCheck('scp-hotkey-enabled', 'hotkeyEnabled');
+        bindCheck('scp-include-sysprompt', 'includeSystemPrompt', updCtx);
+        bindCheck('scp-include-anote', 'includeAuthorsNote', updCtx);
+        bindCheck('scp-include-charcard', 'includeCharacterCard', updCtx);
+        bindCheck('scp-include-persona', 'includeUserPersonality', updCtx);
+        bindInput('scp-hotkey', 'hotkey');
+        bindInput('scp-max-tokens', 'maxTokens', Number);
+        bindInput('scp-history-limit', 'localHistoryLimit', Number, updCtx);
+        bindSelect('scp-conn-source', 'connectionSource', v => {
+            const g = $('scp-profile-group');
+            if (g) g.style.display = v === 'profile' ? '' : 'none';
+        });
+
+        if ($('scp-profile-group')) {
+            $('scp-profile-group').style.display = s.connectionSource === 'profile' ? '' : 'none';
+        }
+
+        const spEl = $('scp-sysprompt');
+        if (spEl) {
+            spEl.value = s.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+            spEl.addEventListener('input', () => { getSettings().systemPrompt = spEl.value; saveSettings(); updCtx(); });
+        }
+
+        $('scp-reset-prompt')?.addEventListener('click', async () => {
+            const ok = await showCustomDialog({ type: 'confirm', title: 'Reset System Prompt', message: 'Reset to default? Your current prompt will be lost.' });
+            if (!ok) return;
+            getSettings().systemPrompt = DEFAULT_SYSTEM_PROMPT;
+            if (spEl) spEl.value = DEFAULT_SYSTEM_PROMPT;
+            saveSettings(); updCtx(); toastr.success('System prompt reset.', EXT_DISPLAY);
+        });
+
+        $('scp-hotkey')?.addEventListener('change', setupHotkey);
+        $('scp-hotkey-enabled')?.addEventListener('change', setupHotkey);
+
+        const profSel = $('scp-conn-profile');
+        if (profSel) {
+            profSel.addEventListener('mouseenter', updateProfilesList);
+            profSel.addEventListener('focus', updateProfilesList);
+            profSel.addEventListener('change', () => { getSettings().connectionProfileId = profSel.value; saveSettings(); });
+        }
+
+        // Config profiles
+        refreshProfilesDropdown();
+
+        $('scp-profile-select')?.addEventListener('change', () => {
+            const name = $('scp-profile-select').value;
+            if (name) loadProfile(name);
+            updateBindingSection();
+        });
+
+        $('scp-profile-save-new')?.addEventListener('click', async () => {
+            const name = await showCustomDialog({ type: 'prompt', title: 'Save Configuration', message: 'Enter a name for this configuration:', placeholder: 'My Config' });
+            if (!name?.trim()) return;
+            saveProfile(name.trim()); refreshProfilesDropdown();
+            const sel = $('scp-profile-select'); if (sel) sel.value = name.trim();
+            updateBindingSection(); toastr.success(`Saved "${name.trim()}"`, EXT_DISPLAY);
+        });
+
+        $('scp-profile-rename')?.addEventListener('click', async () => {
+            const sel = $('scp-profile-select');
+            if (!sel?.value) return toastr.info('No configuration selected.', EXT_DISPLAY);
+            const newName = await showCustomDialog({ type: 'prompt', title: 'Rename Configuration', message: 'New name:', defaultValue: sel.value });
+            if (!newName?.trim() || newName.trim() === sel.value) return;
+            const s2 = getSettings(); const p = s2.profiles[sel.value]; if (!p) return;
+            s2.profiles[newName.trim()] = p; delete s2.profiles[sel.value];
+            if (s2.activeProfile === sel.value) s2.activeProfile = newName.trim();
+            for (const k in s2.profileBindings) { if (s2.profileBindings[k] === sel.value) s2.profileBindings[k] = newName.trim(); }
+            saveSettings(); refreshProfilesDropdown();
+            const newSel = $('scp-profile-select'); if (newSel) newSel.value = newName.trim();
+            updateBindingSection(); toastr.success('Renamed.', EXT_DISPLAY);
+        });
+
+        $('scp-profile-delete')?.addEventListener('click', async () => {
+            const sel = $('scp-profile-select'); if (!sel?.value) return;
+            const ok = await showCustomDialog({ type: 'confirm', title: 'Delete Configuration', message: `Delete "${sel.value}"?` });
+            if (!ok) return;
+            deleteProfile(sel.value); refreshProfilesDropdown(); updateBindingSection();
+            toastr.success('Deleted.', EXT_DISPLAY);
+        });
+
+        $('scp-bind-char')?.addEventListener('click', () => {
+            const sel = $('scp-profile-select'); if (!sel?.value) return;
+            const s2 = getSettings(); const { charId } = getBindingKey(); const key = `char_${charId}`;
+            if (s2.profileBindings[key] === sel.value) delete s2.profileBindings[key];
+            else s2.profileBindings[key] = sel.value;
+            saveSettings(); updateBindingSection();
+        });
+
+        $('scp-bind-chat')?.addEventListener('click', () => {
+            const sel = $('scp-profile-select'); if (!sel?.value) return;
+            const s2 = getSettings(); const { charId, chatId } = getBindingKey(); const key = `chat_${charId}_${chatId}`;
+            if (s2.profileBindings[key] === sel.value) delete s2.profileBindings[key];
+            else s2.profileBindings[key] = sel.value;
+            saveSettings(); updateBindingSection();
+        });
+
+        $('scp-open-window')?.addEventListener('click', showWindow);
+        $('scp-clear-sessions')?.addEventListener('click', async () => {
+            const ok = await showCustomDialog({ 
+                type: 'confirm', 
+                title: 'Clear All Sessions', 
+                message: 'Delete ALL Copilot sessions for all characters and chats? This cannot be undone.',
+                delayConfirm: 3
+            });
+            if (!ok) return;
+            getSettings().sessions = {}; saveSettings(); onChatChanged();
+            toastr.success('All sessions cleared.', EXT_DISPLAY);
+        });
+
+        updateProfilesList();
+        buildThemeEditor();
+    }
+
+    // ─── Window Event Listeners ─────────────────────────────────────────────────
+
+    function attachWindowListeners() {
+        makeDraggable($('scp-drag-handle'), windowEl);
+        makeResizable(windowEl);
+
+        $('scp-min-btn')?.addEventListener('click', minimize);
+        $('scp-close-btn')?.addEventListener('click', hideWindow);
+        if (iconEl) makeIconDraggable(iconEl);
+
+        // Opacity
+        $('scp-opacity-btn')?.addEventListener('click', e => { e.stopPropagation(); $('scp-opacity-pop')?.classList.toggle('visible'); });
+        document.addEventListener('click', e => {
+            const pop = $('scp-opacity-pop');
+            if (pop && !pop.contains(e.target) && e.target !== $('scp-opacity-btn')) pop.classList.remove('visible');
+        });
+        const opSlider = $('scp-opacity-slider');
+        if (opSlider) {
+            opSlider.value = getSettings().opacity || 95;
+            $('scp-opacity-val').textContent = `${opSlider.value}%`;
+            opSlider.addEventListener('input', () => {
+                const v = parseInt(opSlider.value);
+                $('scp-opacity-val').textContent = `${v}%`;
+                windowEl.style.opacity = (v / 100).toString();
+                getSettings().opacity = v; saveSettings();
+            });
+        }
+
+        // Session dropdown
+        $('scp-sess-trigger')?.addEventListener('click', e => {
+            e.stopPropagation();
+            const panel = $('scp-sess-panel'); const trigger = $('scp-sess-trigger');
+            const isOpen = panel.classList.contains('open');
+            panel.classList.toggle('open', !isOpen); trigger.classList.toggle('open', !isOpen);
+            if (!isOpen) refreshSessionDropdown();
+        });
+        document.addEventListener('click', e => {
+            const dd = $('scp-sess-dropdown');
+            if (dd && !dd.contains(e.target)) closeSessPanel();
+        });
+
+        $('scp-new-sess-btn')?.addEventListener('click', async () => {
+            closeSessPanel();
+            const { charId, chatId } = getBindingKey();
+            const bucket = getChatBucket(charId, chatId);
+            const defaultName = `Session ${bucket.sessions.length + 1}`;
+            const name = await showCustomDialog({ type: 'prompt', title: 'New Session', message: 'Session name:', defaultValue: defaultName, placeholder: defaultName });
+            if (name === null) return; // user cancelled — do NOT create
+            createSession(charId, chatId, name.trim() || defaultName);
+            refreshSessionDropdown(); renderSession(getCurrentSession());
+        });
+
+        $('scp-rename-sess-btn')?.addEventListener('click', async () => {
+            const sess = getCurrentSession();
+            const newName = await showCustomDialog({ type: 'prompt', title: 'Rename Session', message: 'New session name:', defaultValue: sess.name });
+            if (!newName?.trim()) return;
+            sess.name = newName.trim(); saveSettings(); refreshSessionDropdown();
+        });
+
+        $('scp-del-sess-btn')?.addEventListener('click', async () => {
+            const { charId, chatId } = getBindingKey();
+            const bucket = getChatBucket(charId, chatId);
+            if (!bucket.sessions.length) return;
+            const ok = await showCustomDialog({ type: 'confirm', title: 'Delete Session', message: 'Delete this session and all its messages? This cannot be undone.' });
+            if (!ok) return;
+            const newSess = deleteCurrentSession(charId, chatId);
+            refreshSessionDropdown(); renderSession(newSess);
+        });
+
+        // Depth slider
+        const depthSlider = $('scp-depth-slider');
+        if (depthSlider) {
+            depthSlider.value = getSettings().contextDepth;
+            $('scp-depth-val').textContent = depthSlider.value;
+            
+            depthSlider.addEventListener('input', () => {
+                $('scp-depth-val').textContent = depthSlider.value;
+            });
+            
+            depthSlider.addEventListener('change', () => {
+                getSettings().contextDepth = parseInt(depthSlider.value); 
+                saveSettings();
+                updateMsgCount(getCurrentSession());
+            });
+        }
+        setupDepthClickEdit();
+
+        // Actions
+        $('scp-inspect-btn')?.addEventListener('click', openInspector);
+        $('scp-regen-btn')?.addEventListener('click', handleRegen);
+        $('scp-stop-btn')?.addEventListener('click', () => {
+            _abortController?.abort();
+            const { stopGeneration } = SillyTavern.getContext();
+            if (typeof stopGeneration === 'function') stopGeneration();
+        });
+
+        // Input
+        const inputEl = $('scp-input');
+        if (inputEl) {
+            inputEl.addEventListener('input', () => autoResize(inputEl));
+            inputEl.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } });
+        }
+        $('scp-send-btn')?.addEventListener('click', handleSend);
+
+        // Modal
+        $('scp-modal-close')?.addEventListener('click', () => { modalEl.style.display = 'none'; });
+        modalEl?.addEventListener('click', e => { if (e.target === modalEl) modalEl.style.display = 'none'; });
+        document.querySelectorAll('.scp-modal-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.scp-modal-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                $('scp-ctx-formatted').style.display = tab.dataset.tab === 'formatted' ? '' : 'none';
+                $('scp-ctx-json').style.display = tab.dataset.tab === 'json' ? '' : 'none';
+            });
+        });
+        $('scp-ctx-copy-btn')?.addEventListener('click', () => {
+            const activeTab = document.querySelector('.scp-modal-tab.active');
+            const text = activeTab?.dataset.tab === 'json'
+                ? $('scp-ctx-json')?.textContent || ''
+                : $('scp-ctx-formatted')?.textContent || '';
+            copyText(text);
+        });
+    }
+
+    // ─── Chat Change ─────────────────────────────────────────────────────────────
+
+    function onChatChanged() {
+        updateCharBadge();
+        refreshSessionDropdown();
+        renderSession(getCurrentSession());
+        autoLoadBoundProfile();
+    }
+
+    // ─── Wand Button ─────────────────────────────────────────────────────────────
+
+    function addWandButton() {
+        const menu = document.getElementById('extensionsMenu');
+        if (!menu || document.getElementById('scp-wand-btn')) return;
+        const btn = document.createElement('div');
+        btn.id = 'scp-wand-btn';
+        btn.classList.add('list-group-item', 'flex-container', 'flexGap5');
+        btn.innerHTML = `<div class="fa-solid fa-robot extensionsMenuExtensionButton"></div><span>${EXT_DISPLAY}</span>`;
+        btn.addEventListener('click', toggleVisibility);
+        menu.appendChild(btn);
+    }
+
+    // ─── Init ────────────────────────────────────────────────────────────────────
+
+    async function init() {
+        getSettings(); injectUI();
+        const ctx = SillyTavern.getContext();
+        const container = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
+        if (container) {
+            try {
+                const html = await ctx.renderExtensionTemplateAsync(__extPath, 'settings');
+                if (html) container.insertAdjacentHTML('beforeend', html);
+            } catch (e) {}
+        }
+        restoreWindowState(); attachWindowListeners(); setupSettingsHandlers();
+        const s = getSettings();
+        if (s.windowVisible) {
+            if (s.minimized) iconEl.style.display = 'flex';
+            else windowEl.style.display = 'flex';
+        }
+        onChatChanged();
+        if (ctx.eventSource && ctx.event_types) {
+            ctx.eventSource.on(ctx.event_types.CHAT_CHANGED, onChatChanged);
+            ctx.eventSource.on(ctx.event_types.CHARACTER_SELECTED, onChatChanged);
+            ctx.eventSource.on(ctx.event_types.APP_READY, updateProfilesList);
+        } else {
+            try {
+                const es = window.eventSource; const et = window.event_types;
+                if (es && et) {
+                    es.on(et.CHAT_CHANGED, onChatChanged);
+                    es.on(et.CHARACTER_SELECTED, onChatChanged);
+                    es.on(et.APP_READY, updateProfilesList);
+                }
+            } catch (_) {}
+        }
+        setupHotkey(); addWandButton();
+        console.log(`[${EXT_DISPLAY}] Initialized.`);
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else setTimeout(init, 0);
+})();
