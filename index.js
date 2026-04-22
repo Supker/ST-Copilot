@@ -807,6 +807,7 @@
         out = output.join('\n');
         out = out.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
         out = out.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        out = out.replace(/~~(.+?)~~/g, '<del>$1</del>');
         out = out.replace(/\*(\S(?:[^*\n]*?\S)?)\*/g, '<em>$1</em>');
 
         out = out.replace(/(<(?:ul|pre)\b[^>]*>[\s\S]*?<\/(?:ul|pre)>)|\n/g,

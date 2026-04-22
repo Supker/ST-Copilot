@@ -838,6 +838,10 @@
 }
 .scp-table tr:hover td { background: rgba(255, 255, 255, 0.03); }
 
+.scp-msg-content del {
+    text-decoration: line-through;
+    opacity: 0.8;
+}
 
 /* ── Mobile ──────────────────────────────────────────────────── */
 
