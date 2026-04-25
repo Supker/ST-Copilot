@@ -14,6 +14,10 @@
                         <input id="scp-enabled" type="checkbox" />
                         <span>Enable ST-Copilot</span>
                     </label>
+                    <label class="checkbox_label" style="margin-top:6px">
+                        <input id="scp-icon-persistent" type="checkbox" />
+                        <span>Always show floating icon</span>
+                    </label>
                     <div style="margin-top:10px">
                         <b style="font-size:12px">Keyboard Shortcut</b>
                         <label class="checkbox_label" style="margin-top:6px">
@@ -86,6 +90,13 @@
                         </div>
                         <label style="margin-top:10px; font-size:11px; color:#888; display:block; margin-bottom:4px">Session History Depth Limit</label>
                         <input id="scp-history-limit" type="number" class="text_pole" placeholder="50" min="1" max="500" />
+                        <div style="margin-top:14px; border-top:1px solid rgba(255,255,255,.06); padding-top:12px">
+                            <b style="font-size:12px">Response String Trimming</b>
+                            <label style="font-size:11px; color:#888; display:block; margin:6px 0 3px">
+                                Strings to remove from responses (one per line). Useful for empty reasoning blocks, e.g. <code style="font-size:10px;background:rgba(0,0,0,.3);padding:1px 4px;border-radius:3px">&lt;think&gt;&lt;/think&gt;</code>
+                            </label>
+                            <textarea id="scp-reasoning-trim" class="text_pole" rows="3" style="font-size:12px;font-family:monospace" placeholder="&lt;think&gt;&lt;/think&gt;&#10;&lt;thinking&gt;&lt;/thinking&gt;"></textarea>
+                        </div>
                     </div>
                 </div>
 
@@ -100,6 +111,31 @@
                         <button id="scp-reset-prompt" class="menu_button interactable" style="margin-top:6px; align-self:flex-start">
                             <i class="fa-solid fa-arrow-rotate-left"></i> Reset to Default
                         </button>
+                    </div>
+                </div>
+
+                <!-- ── Lorebook ──────────────────────────────────── -->
+                <div class="inline-drawer scp-settings-drawer">
+                    <div class="inline-drawer-toggle inline-drawer-header">
+                        <b><i class="fa-solid fa-book" style="margin-right:6px"></i>Lorebook AI Edits</b>
+                        <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+                    </div>
+                    <div class="inline-drawer-content">
+                        <label style="font-size:11px; color:#888; display:block; margin-bottom:4px">
+                            AI Edit Prompt
+                            <span style="font-size:10px; opacity:.65"> — используй <code style="font-size:10px;background:rgba(0,0,0,.3);padding:1px 4px;border-radius:3px">{{lorebook_output}}</code> чтобы вставить блок формата (не удаляй его)</span>
+                        </label>
+                        <textarea id="scp-lb-manage-prompt" class="text_pole autoSetHeight" rows="5" style="font-size:12px; margin-top:4px; font-family:monospace"></textarea>
+                        <button id="scp-reset-lb-prompt" class="menu_button interactable" style="margin-top:6px; align-self:flex-start">
+                            <i class="fa-solid fa-arrow-rotate-left"></i> Reset to Default
+                        </button>
+                        <div style="margin-top:14px; border-top:1px solid rgba(255,255,255,.06); padding-top:12px">
+                            <b style="font-size:12px">Keyword Scan Depth</b>
+                            <label style="font-size:11px; color:#888; display:block; margin:8px 0 3px">Main chat messages to scan</label>
+                            <input id="scp-lb-st-scan-depth" type="number" class="text_pole" placeholder="5" min="0" max="200" />
+                            <label style="font-size:11px; color:#888; display:block; margin:8px 0 3px">Copilot messages to scan</label>
+                            <input id="scp-lb-copilot-scan-depth" type="number" class="text_pole" placeholder="6" min="0" max="200" />
+                        </div>
                     </div>
                 </div>
 
