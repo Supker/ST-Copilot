@@ -51,6 +51,15 @@
     line-height: 1.5;
     transition: opacity 0.2s;
 }
+.scp-window.scp-dragging,
+.scp-window.scp-resizing {
+    will-change: left, top, width, height;
+    transition: none;
+    user-select: none;
+}
+.scp-window.scp-dragging { cursor: grabbing; }
+.scp-window.scp-dragging * { pointer-events: none; }
+.scp-window.scp-resizing * { pointer-events: none; }
 
 .scp-window *::-webkit-scrollbar { width: 5px; height: 5px; }
 .scp-window *::-webkit-scrollbar-track { background: transparent; }
@@ -81,6 +90,7 @@
     border-bottom: var(--scp-border);
     cursor: grab;
     user-select: none;
+    touch-action: none;
     gap: 8px;
 }
 .scp-header:active { cursor: grabbing; }
@@ -128,11 +138,15 @@
     padding: 6px 10px;
     background: var(--scp-toolbar-bg);
     border-bottom: var(--scp-border);
+    overflow-x: auto;
+    overflow-y: visible;
+    scrollbar-width: none;
 }
+.scp-toolbar::-webkit-scrollbar { display: none; }
 
 /* ── Session Dropdown ────────────────────────────────────────── */
 
-.scp-sess-wrap { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 150px; }
+.scp-sess-wrap { display: flex; align-items: center; gap: 4px; flex: 1 1 160px; min-width: 160px; }
 .scp-sess-dropdown { position: relative; flex: 1; min-width: 0; }
 
 .scp-sess-trigger {
@@ -160,12 +174,12 @@
 
 .scp-sess-panel {
     display: none;
-    position: absolute; top: calc(100% + 5px); left: 0;
-    min-width: 100%; width: max-content; max-width: 300px;
+    position: fixed;
+    min-width: 200px; width: max-content; max-width: 400px;
     background: var(--scp-bg); border: var(--scp-border);
     border-radius: 10px;
     box-shadow: 0 16px 48px rgba(0,0,0,0.6), 0 4px 12px rgba(0,0,0,0.3);
-    z-index: 200; overflow: hidden;
+    z-index: 99950; overflow: hidden;
 }
 .scp-sess-panel.open {
     display: block;
@@ -236,6 +250,7 @@
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     width: 26px; height: 26px; border-radius: 5px; flex-shrink: 0;
     transition: color 0.15s, background 0.15s, border-color 0.15s; padding: 0;
+    -webkit-tap-highlight-color: transparent;
 }
 .scp-tbtn:hover { color: var(--scp-accent); background: var(--scp-accent-bg); border-color: var(--scp-accent-dim); }
 .scp-tbtn-danger:hover { color: var(--scp-danger); background: rgba(255,92,92,0.08); border-color: rgba(255,92,92,0.3); }
@@ -280,7 +295,7 @@
     height: 4px !important; border-radius: 2px !important;
     background: rgba(255,255,255,0.2) !important; outline: none !important;
     cursor: pointer !important; margin: 0 !important; padding: 0 !important;
-    min-width: 90px !important; border: none !important;
+    min-width: 40px !important; border: none !important;
 }
 .scp-slider::-webkit-slider-thumb {
     -webkit-appearance: none !important; appearance: none !important;
@@ -293,7 +308,9 @@
     transform: scale(1.3) !important;
     box-shadow: 0 0 0 3px var(--scp-accent-bg) !important;
 }
-.scp-depth-slider { width: 55px; }
+.scp-depth-slider { width: 50px; flex-shrink: 1; }
+
+#scp-lb-btn { flex-shrink: 0; }
 
 /* ── Messages Area ───────────────────────────────────────────── */
 
@@ -508,8 +525,10 @@
     background: var(--scp-accent-bg); border: 1px solid var(--scp-accent-dim);
     color: var(--scp-accent); cursor: pointer;
     display: flex; align-items: center; justify-content: center;
-    z-index: 9901; box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    z-index: 99910; box-shadow: 0 4px 20px rgba(0,0,0,0.4);
     transition: all 0.2s;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
     animation: scp-dock-appear 0.25s cubic-bezier(0.34,1.56,0.64,1);
 }
 .scp-dock-icon:hover {
@@ -530,17 +549,23 @@
 /* ── Context Inspector Modal ─────────────────────────────────── */
 
 .scp-modal-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; width: 100vw;
+    height: 100vh; height: 100dvh;
+    background: rgba(0,0,0,0.6);
     backdrop-filter: blur(4px); z-index: 99999;
     display: flex; align-items: center; justify-content: center;
     animation: scp-modal-fade 0.15s ease;
+    box-sizing: border-box;
+    padding: 16px;
 }
 @keyframes scp-modal-fade { from { opacity: 0; } to { opacity: 1; } }
 
 .scp-modal {
     background: var(--scp-bg); border: var(--scp-border);
     border-radius: 12px; box-shadow: 0 32px 80px rgba(0,0,0,0.7);
-    width: 680px; max-width: 95vw; max-height: 80vh;
+    width: 680px; max-width: 100%; max-height: 80vh; max-height: 80dvh;
     display: flex; flex-direction: column; overflow: hidden;
     animation: scp-modal-slide 0.18s cubic-bezier(0.34,1.56,0.64,1);
     color: var(--scp-text); font-family: var(--scp-font);
@@ -583,10 +608,17 @@
 /* ── Custom Dialog ───────────────────────────────────────────── */
 
 .scp-dialog-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.72);
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; width: 100vw;
+    height: 100vh; height: 100dvh;
+    background: rgba(0,0,0,0.72);
     backdrop-filter: blur(8px); z-index: 999999;
     display: flex; align-items: center; justify-content: center;
     opacity: 0; transition: opacity 0.15s;
+    box-sizing: border-box;
+    padding: 20px 16px;
+    overscroll-behavior: contain;
 }
 .scp-dialog-overlay.visible { opacity: 1; }
 
@@ -595,11 +627,14 @@
     border: 1px solid rgba(255,255,255,0.12);
     border-radius: 14px;
     padding: 26px 26px 22px;
-    min-width: 300px; max-width: 440px; width: 90vw;
+    min-width: 280px; max-width: 440px; width: min(90vw, 440px);
+    max-height: calc(100dvh - 40px); max-height: calc(100vh - 40px);
+    overflow-y: auto;
     box-shadow: 0 40px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.04) inset;
     animation: scp-dialog-in 0.2s cubic-bezier(0.34,1.56,0.64,1);
     color: var(--SmartThemeBodyColorText, #e2e2e6);
     font-family: var(--primaryFontFamily, system-ui, sans-serif);
+    box-sizing: border-box;
 }
 @keyframes scp-dialog-in {
     from { transform: scale(0.88) translateY(-10px); opacity: 0; }
@@ -893,15 +928,25 @@ details.scp-reasoning-block[open] .scp-reasoning-summary::before { transform: ro
 }
 
 
-/* ── Mobile ──────────────────────────────────────────────────── */
+/* ── Mobile / Tablet ─────────────────────────────────────────── */
 
-@media screen and (max-width: 600px) {
+@media screen and (max-width: 900px) {
     .scp-window {
-        top: 4vh !important; left: 3vw !important;
-        right: 3vw !important; width: 94vw !important;
-        height: 80dvh !important; min-width: unset !important;
+        width: min(94vw, 560px) !important;
+        height: min(82dvh, 700px) !important;
+        min-width: unset !important;
+        max-width: calc(100vw - 10px) !important;
     }
-    .scp-dock-icon { bottom: 100px; right: 14px; }
+    .scp-dock-icon {
+        bottom: max(100px, calc(env(safe-area-inset-bottom, 0px) + 80px));
+        right: max(14px, env(safe-area-inset-right, 14px));
+    }
+    .scp-dialog-box {
+        width: min(90vw, 420px);
+        max-height: calc(90dvh - 40px);
+        max-height: calc(90vh - 40px);
+    }
+    .scp-modal { max-width: 100%; max-height: calc(90dvh); max-height: calc(90vh); }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -909,10 +954,18 @@ details.scp-reasoning-block[open] .scp-reasoning-summary::before { transform: ro
 ═══════════════════════════════════════════════════════════════ */
 
 .scp-lb-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.72);
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; width: 100vw;
+    height: 100vh; height: 100dvh;
+    background: rgba(0,0,0,0.72);
     backdrop-filter: blur(6px); z-index: 99998;
     display: flex; align-items: center; justify-content: center;
     animation: scp-modal-fade 0.18s ease;
+    box-sizing: border-box;
+    padding: 16px;
+    overscroll-behavior: contain;
+    -webkit-tap-highlight-color: transparent;
     --scp-bg: rgba(18,18,22,0.97);
     --scp-blur: blur(14px);
     --scp-border: 1px solid rgba(255,255,255,0.09);
@@ -933,7 +986,9 @@ details.scp-reasoning-block[open] .scp-reasoning-summary::before { transform: ro
 }
 
 .scp-lb-panel {
-    width: min(1100px, 97vw); height: min(760px, 94vh);
+    width: min(1100px, calc(100vw - 32px));
+    height: min(760px, calc(100vh - 32px));
+    height: min(760px, calc(100dvh - 32px));
     background: var(--scp-bg);
     backdrop-filter: var(--scp-blur);
     -webkit-backdrop-filter: var(--scp-blur);
@@ -943,6 +998,7 @@ details.scp-reasoning-block[open] .scp-reasoning-summary::before { transform: ro
     display: flex; flex-direction: column; overflow: hidden;
     color: var(--scp-text);
     font-family: var(--scp-font);
+    flex-shrink: 0;
     animation: scp-modal-slide 0.22s cubic-bezier(0.34,1.4,0.64,1);
 }
 
@@ -1338,6 +1394,93 @@ details.scp-reasoning-block[open] .scp-reasoning-summary::before { transform: ro
 .scp-lb-proposal-done { padding: 8px; text-align: center; font-size: 12px; color: var(--scp-text-muted); }
 .scp-lb-proposal-rejected { color: rgba(255,92,92,0.5) !important; }
 
+/* ── Inline lorebook world dropdown (proposal card) ──────────── */
+.scp-lb-proposal-world-dd {
+    display: flex;
+    align-items: center;
+    margin-top: 5px;
+}
+
+.scp-lb-proposal-world-trigger {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 1px 7px 1px 6px; border-radius: 20px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--scp-text-muted);
+    font-size: 11px; font-family: var(--scp-font);
+    cursor: pointer; transition: all 0.15s;
+    white-space: nowrap; max-width: 220px;
+    line-height: 1.5;
+}
+.scp-lb-proposal-world-trigger:hover,
+.scp-lb-proposal-world-trigger.open {
+    border-color: var(--scp-accent-dim);
+    background: var(--scp-accent-bg);
+    color: var(--scp-text);
+}
+.scp-lb-proposal-world-trigger.warn {
+    border-color: rgba(255,92,92,0.4);
+    background: rgba(255,92,92,0.08);
+    color: var(--scp-danger);
+}
+.scp-lb-proposal-world-trigger.loading {
+    opacity: 0.6; cursor: wait;
+}
+.scp-lb-proposal-world-trigger-text {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;
+}
+.scp-lb-proposal-world-chevron {
+    display: flex; flex-shrink: 0; color: var(--scp-text-muted);
+    transition: transform 0.18s;
+}
+.scp-lb-proposal-world-trigger.open .scp-lb-proposal-world-chevron { transform: rotate(180deg); }
+
+.scp-lb-proposal-world-panel {
+    display: none;
+    position: fixed;
+    min-width: 180px; width: max-content; max-width: 280px;
+    background: var(--scp-bg); border: var(--scp-border);
+    border-radius: 10px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.6), 0 4px 12px rgba(0,0,0,0.3);
+    z-index: 99960; overflow: hidden;
+    padding: 5px;
+}
+.scp-lb-proposal-world-panel.open {
+    display: block;
+    animation: scp-panel-in 0.15s ease;
+}
+.scp-lb-proposal-world-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: 6px; cursor: pointer;
+    transition: background 0.12s; font-size: 12px; color: var(--scp-text);
+}
+.scp-lb-proposal-world-item:hover { background: rgba(255,255,255,0.05); }
+.scp-lb-proposal-world-item.active {
+    background: var(--scp-accent-bg); color: var(--scp-accent);
+}
+.scp-lb-proposal-world-item-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--scp-text-muted); flex-shrink: 0;
+    transition: background 0.15s;
+}
+.scp-lb-proposal-world-item.active .scp-lb-proposal-world-item-dot {
+    background: var(--scp-accent);
+    box-shadow: 0 0 6px var(--scp-accent-dim);
+}
+.scp-lb-proposal-world-sep {
+    height: 1px; background: rgba(255,255,255,0.07); margin: 4px 2px;
+}
+.scp-lb-proposal-world-new {
+    display: flex; align-items: center; gap: 7px;
+    color: var(--scp-accent); font-size: 11px;
+}
+.scp-lb-proposal-world-new:hover { background: var(--scp-accent-bg); }
+.scp-lb-proposal-world-new svg { flex-shrink: 0; }
+.scp-lb-proposal-world-empty {
+    padding: 10px; font-size: 11px; color: var(--scp-text-muted);
+    text-align: center; font-style: italic;
+}
+
 /* ── Proposal card additions ─────────────────────────────────── */
 
 .scp-lb-proposal-item-header {
@@ -1611,9 +1754,166 @@ details.scp-reasoning-block[open] .scp-reasoning-summary::before { transform: ro
 }
 
 /* ── Mobile LB ───────────────────────────────────────────────── */
-@media screen and (max-width: 600px) {
-    .scp-lb-panel { width: 97vw; height: 93vh; border-radius: 10px; }
+@media screen and (max-width: 900px) {
+    .scp-lb-panel {
+        width: calc(100vw - 20px);
+        height: calc(100dvh - 32px);
+        height: calc(100vh - 32px);
+        min-height: 0;
+        border-radius: 10px;
+    }
+    .scp-lb-body { height: 0; }
     .scp-lb-sidebar { width: 200px; }
     .scp-lb-header { flex-wrap: wrap; }
     .scp-lb-header-center { order: 3; width: 100%; }
+}
+
+/* ── Phone: full vertical stack layout ───────────────────────── */
+@media screen and (max-width: 600px) {
+    .scp-lb-overlay {
+        padding: max(20px, env(safe-area-inset-top, 20px)) 8px max(8px, env(safe-area-inset-bottom, 8px));
+        align-items: flex-start;
+        justify-content: center;
+    }
+
+    .scp-lb-panel {
+        width: calc(100vw - 16px);
+        height: auto;
+        min-height: 60dvh;
+        min-height: 60vh;
+        max-height: calc(100dvh - max(28px, env(safe-area-inset-top, 20px)) - 12px);
+        max-height: calc(100vh - max(28px, env(safe-area-inset-top, 20px)) - 12px);
+        border-radius: 12px;
+    }
+
+    /* Header: grid — row1: title+controls, row2: search */
+    .scp-lb-header {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
+        gap: 8px 6px;
+        padding: 9px 12px 8px;
+        align-items: center;
+    }
+    .scp-lb-header-left {
+        grid-column: 1; grid-row: 1;
+        min-width: 0; overflow: hidden;
+    }
+    .scp-lb-title { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .scp-lb-header-right {
+        grid-column: 2; grid-row: 1;
+        margin-left: 0;
+        gap: 5px;
+        flex-shrink: 0;
+    }
+    .scp-lb-header-center {
+        grid-column: 1 / -1; grid-row: 2;
+        width: 100%; order: unset;
+    }
+    .scp-lb-toggle-wrap { flex-direction: column; gap: 3px; align-items: center; }
+    .scp-lb-toggle-label { display: block; font-size: 9px; line-height: 1; }
+    .scp-lb-toggle { width: 30px; height: 16px; }
+    .scp-lb-toggle-knob { width: 10px; height: 10px; }
+    .scp-lb-toggle.active .scp-lb-toggle-knob { transform: translateX(14px); }
+    .scp-lb-search-wrap { max-width: 100%; }
+    .scp-lb-search { font-size: 13px; padding: 9px 0; }
+
+    /* Body: vertical — sidebar strip on top, entries below */
+    .scp-lb-body {
+        flex-direction: column;
+        height: 0;
+    }
+
+    /* Sidebar → horizontal scrollable chip strip */
+    .scp-lb-sidebar {
+        width: 100%;
+        height: auto;
+        flex-shrink: 0;
+        border-right: none;
+        border-bottom: var(--scp-border);
+        flex-direction: column;
+        overflow: visible;
+    }
+    .scp-lb-sidebar-header { display: none; }
+    .scp-lb-sidebar-legend { display: none; }
+    .scp-lb-book-list {
+        display: flex;
+        flex-direction: row;
+        flex: unset;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 8px 8px 8px;
+        gap: 6px;
+        scrollbar-width: thin;
+        -webkit-overflow-scrolling: touch;
+    }
+    .scp-lb-book-item {
+        flex-direction: column;
+        align-items: flex-start;
+        min-width: 120px;
+        max-width: 150px;
+        flex-shrink: 0;
+        padding: 7px 9px;
+        border: 1px solid rgba(255,255,255,0.08);
+        background: rgba(255,255,255,0.025);
+        border-radius: 8px;
+        gap: 4px;
+    }
+    .scp-lb-book-item.lb-book-open {
+        transform: none;
+        background: var(--scp-accent-bg);
+        border-color: var(--scp-accent-dim);
+    }
+    /* Inline row for check + name */
+    .scp-lb-book-check { flex-shrink: 0; }
+    .scp-lb-book-info { width: 100%; }
+    .scp-lb-book-name { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100px; }
+    .scp-lb-book-meta { font-size: 9px; }
+    .scp-lb-book-active-dot {
+        width: 5px; height: 5px;
+        position: absolute; top: 5px; right: 5px;
+    }
+    .scp-lb-src-badge { font-size: 8px; min-width: 13px; height: 13px; }
+    .scp-lb-embedded-badge { display: none; }
+
+    /* Main panel: fill rest */
+    .scp-lb-main { flex: 1; min-height: 0; }
+
+    /* Main toolbar: compact wrap */
+    .scp-lb-main-toolbar {
+        padding: 7px 10px;
+        flex-wrap: wrap;
+        gap: 5px;
+    }
+    .scp-lb-entries-label { font-size: 11px; width: 100%; }
+    .scp-lb-main-actions { gap: 4px; }
+    .scp-lb-bulk-btn { font-size: 10px; padding: 4px 8px; }
+    .scp-lb-add-btn { font-size: 11px; padding: 4px 10px; }
+
+    /* Context legend: hidden to save space */
+    .scp-lb-ctx-legend { display: none; }
+
+    /* Entry rows: bigger touch targets */
+    .scp-lb-entry-row { padding: 11px 10px; }
+    .scp-lb-entry-name { font-size: 13px; }
+    .scp-lb-entry-keys { font-size: 11px; }
+    .scp-lb-entry-indicator { width: 9px; height: 9px; }
+    .scp-lb-entry-toggle-btn,
+    .scp-lb-entry-view-btn {
+        width: 32px; height: 32px; font-size: 13px;
+    }
+    .scp-lb-in-ctx-badge { font-size: 9px; }
+
+    /* Entry detail: full-width, bigger inputs */
+    .scp-lb-detail-header { padding: 10px 12px; }
+    .scp-lb-detail-input { font-size: 13px; padding: 9px 11px; }
+    .scp-lb-detail-textarea { font-size: 12px; min-height: 120px; }
+    .scp-lb-detail-label { font-size: 11px; }
+    .scp-lb-detail-btn { font-size: 11px; padding: 5px 11px; }
+    .scp-lb-inj-btn { font-size: 11px; padding: 5px 11px; }
+
+    /* Footer: minimal */
+    .scp-lb-footer { padding: 6px 12px; }
+    .scp-lb-footer-info { font-size: 10px; }
+    .scp-lb-footer-ctx { font-size: 10px; }
 }

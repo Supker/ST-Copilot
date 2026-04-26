@@ -54,13 +54,35 @@
     `</system_prompt>\n`;
 
     const DEFAULT_LB_MANAGE_PROMPT =
-    `You are authorized to propose Lorebook updates ONLY when explicitly commanded by the user.\n` +
-    `\n` +
-    `When triggered, generate a markdown code block tagged exactly as \`lorebook-changes\`.\n` +
-    `\n` +
-    `Format requirment:\n` +
-    `{{lorebook_output}}\n` +
-    `You should write these changes at the very end of your message.`;
+    "<context>\n" +
+    "A Lorebook (or World Info) is a dynamic memory system used in roleplay to store and seamlessly retrieve facts about the world, characters, locations, items, and lore. When specific keywords (`triggers`) are mentioned in the chat, the system secretly injects the corresponding `content` into the AI's prompt.\n" +
+    "</context>\n" +
+    "\n" +
+    "<system_mechanics>\n" +
+    "After you generate a proposal, a background script extracts your `lorebook-changes` block for the user's UI. Once the user makes a decision, the system AUTOMATICALLY DELETES the code block from your message history to save context tokens. \n" +
+    "If you look at the chat history and notice your previous `lorebook-changes` blocks are missing, understand that this is intentional system behavior. You successfully delivered them. Do NOT re-generate, repeat, or fix missing blocks from past messages.\n" +
+    "</system_mechanics>\n" +
+    "\n" +
+    "<guidelines>\n" +
+    "1. Authorization Role: You act as a Drafting Advisor. You are authorized to PROPOSE Lorebook updates ONLY when explicitly commanded by the user. You do not apply changes directly; the user makes the final decision.\n" +
+    "2. Cognitive Processing & Explanation: Before generating the proposal block, you MUST explain your reasoning in your regular conversational response. Briefly describe what entry you are proposing to add, edit, or delete, and why. \n" +
+    "3. Conversational Flow: Since your code blocks will be deleted later, do not end your conversational text with phrases like \"Here is the code block below:\". Treat the code block as a detached technical appendix.\n" +
+    "4. Semantic Restrictions: ALWAYS use language indicating a suggestion (e.g., \"I propose adding...\", \"I suggest editing...\"). NEVER state that changes have been \"applied\", \"saved\", or \"made\", as you only generate drafts.\n" +
+    "5. Semantic Density of Entries: Write `content` that is concise, factual, and information-dense. Avoid fluff to minimize token consumption.\n" +
+    "6. Trigger Optimization: Choose `triggers` carefully. Use specific nouns, names, or unique phrases. Avoid overly generic words.\n" +
+    "7. Target Definition and Naming Conventions (CRITICAL):\n" +
+    "   - Currently active lorebooks: {{active_lorebooks}}\n" +
+    "   - Modifying Existing: If your target lorebook exists in the active list above, you MUST apply absolute strict string matching. Do not alter spelling, spacing, capitalization, or punctuation.\n" +
+    "   - Creating New: If the context requires a categorization not present in the active list, you are authorized to draft a NEW lorebook. Assign it a concise, logical name.\n" +
+    "</guidelines>\n" +
+    "\n" +
+    "<output_formatting>\n" +
+    "When proposing changes, generate a markdown code block tagged exactly as `lorebook-changes`.\n" +
+    "This block MUST be placed at the very end of your message, after all conversational text.\n" +
+    "\n" +
+    "Format requirement (Strictly adhere to this JSON structure):\n" +
+    "{{lorebook_output}}\n" +
+    "</output_formatting>";
 
     const LB_FORMAT_BLOCK =
     '```lorebook-changes\n' +
@@ -248,15 +270,23 @@
         const ctx = SillyTavern.getContext();
         const payload = { ...data };
         delete payload._ts;
-        if (typeof ctx.saveWorldInfo === 'function') {
-            await ctx.saveWorldInfo(name, payload);
-        } else {
-            const res = await fetch('/api/worldinfo/edit', {
-                method: 'POST',
-                headers: { ...ctx.getRequestHeaders(), 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, data: payload }),
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        try {
+            if (typeof ctx.saveWorldInfo === 'function') {
+                await ctx.saveWorldInfo(name, payload);
+            } else {
+                const res = await fetch('/api/worldinfo/edit', {
+                    method: 'POST',
+                    headers: { ...ctx.getRequestHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, data: payload }),
+                });
+                if (!res.ok) {
+                    const errText = await res.text().catch(() => res.statusText);
+                    throw new Error(`HTTP ${res.status}: ${errText}`);
+                }
+            }
+        } catch (e) {
+            console.error(`[${EXT_DISPLAY}] saveWorldInfoBook failed for "${name}":`, e);
+            throw e;
         }
         delete _wiCache[name];
         
@@ -480,9 +510,23 @@
     function buildLBAIInstructions(settings) {
         if (!settings.lorebookAIManageEnabled) return '';
         
-        const rawPrompt = settings.lorebookManagePrompt || DEFAULT_LB_MANAGE_PROMPT;
+        const activeBooks =[...new Set(_lastActiveEntries.map(e => e.displayName || e.bookName))];
+        const activeBooksStr = activeBooks.length > 0 ? activeBooks.map(b => `"${b}"`).join(', ') : 'None';
+        
+        let rawPrompt = settings.lorebookManagePrompt || DEFAULT_LB_MANAGE_PROMPT;
+        
+        if (!rawPrompt.includes('{{active_lorebooks}}')) {
+            if (rawPrompt.includes('Format requirment:')) {
+                rawPrompt = rawPrompt.replace('Format requirment:', `Active lorebooks: {{active_lorebooks}}\n\nFormat requirment:`);
+            } else {
+                rawPrompt = `Active lorebooks: {{active_lorebooks}}\n\n` + rawPrompt;
+            }
+        }
+
         const prompt = rawPrompt
+            .replace('{{active_lorebooks}}', activeBooksStr)
             .replace('{{lorebook_output}}', LB_FORMAT_BLOCK);
+            
         return `\n\n<lorebook_management>\n${prompt}\n</lorebook_management>`;
     }
 
@@ -506,7 +550,6 @@
         const fuzzyWorld = bookName.toLowerCase();
         const fuzzyName = (change.originalName || change.name || '').toLowerCase();
         
-        // Попытка найти точную запись из тех, что недавно улетали в контекст (устраняет галлюцинации)
         if (fuzzyName) {
             const activeMatch = _lastActiveEntries.find(le => {
                 const wMatch = !fuzzyWorld || le.displayName.toLowerCase() === fuzzyWorld || le.bookName.toLowerCase() === fuzzyWorld;
@@ -553,15 +596,73 @@
             }
         }
 
+        if (!data) {
+            console.warn(`[${EXT_DISPLAY}] resolveLBChangeTarget: no book data found`, {
+                change, resolvedBookName: bookName, activeBooks: getActiveLorebookNames(), cacheKeys: Object.keys(_wiCache)
+            });
+        } else if (!origEntry && change.action !== 'add') {
+            console.warn(`[${EXT_DISPLAY}] resolveLBChangeTarget: entry not found`, {
+                fuzzyName, fuzzyWorld, targetUid,
+                entries: Object.values(data.entries || {}).map(e => ({ uid: e.uid, comment: e.comment, key: e.key?.slice(0, 3) }))
+            });
+        }
         return { bookName, data, origEntry };
     }
 
+    function logLBHistoryChanges(changes, statusStr) {
+        if (!changes || !changes.length) return;
+        try {
+            const session = getCurrentSession();
+            const icons = { add: '✚', edit: '✎', delete: '✕' };
+            const statusIcon = statusStr === 'Accepted' ? '✓' : (statusStr === 'Rejected' ? '✕' : '·');
+
+            const actionText = statusStr === 'Accepted' ? 'ACCEPTED' :
+                               (statusStr === 'Rejected' ? 'REJECTED' : 'DISMISSED (ignored)');
+
+            const newLines = changes.map(c => {
+                const act = (c.action || 'edit').toUpperCase();
+                return `${statusIcon} **${actionText}**: ${icons[c.action] || '·'} ${act} "${escHtml(c.name || `Entry #${c.uid || '?'}`)}" in \`${escHtml(c.worldName || '?')}\``;
+            });
+
+            const lastMsg = session.messages[session.messages.length - 1];
+            if (lastMsg && lastMsg.isLBHistory) {
+                if (!lastMsg.appliedLines) lastMsg.appliedLines =[];
+                lastMsg.appliedLines.push(...newLines);
+                lastMsg.content = `**System Notification** — User interaction with proposed lorebook changes:\n${lastMsg.appliedLines.join('\n')}`;
+                
+                if (lastMsg.role !== 'system') lastMsg.role = 'system';
+                
+                updateMessage(session, lastMsg.id, lastMsg.content);
+
+                const msgEl = document.querySelector(`.scp-msg[data-id="${lastMsg.id}"] .scp-msg-content`);
+                if (msgEl) msgEl.innerHTML = renderMarkdown(lastMsg.content);
+            } else {
+                const histText = `**System Notification** — User interaction with proposed lorebook changes:\n${newLines.join('\n')}`;
+                
+                const histMsg = addMessage(session, 'system', histText, { isLBHistory: true, appliedLines: [...newLines] });
+                appendLBHistoryEl(histMsg);
+            }
+        } catch (_) {}
+    }
+
     async function applyLBChanges(changes) {
+        console.log(`[${EXT_DISPLAY}] applyLBChanges: processing ${changes.length} change(s)`, JSON.parse(JSON.stringify(changes)));
         const bookCache = {};
+        const successfulChanges =[];
+
         for (const change of changes) {
             const { bookName, data, origEntry } = await resolveLBChangeTarget(change);
-            if (!data || !bookName) continue;
-            
+            if (!data) {
+                const msg = `Lorebook not found: "${change.worldName || '(empty)'}" — is it active in this chat?`;
+                toastr.error(`[LB] ${msg}`, EXT_DISPLAY, { timeOut: 10000 });
+                console.error(`[${EXT_DISPLAY}] applyLBChanges: ${msg}`, change);
+                continue;
+            }
+            if (!bookName) {
+                toastr.error(`[LB] Could not resolve book name for change: "${change.name || change.uid || '?'}"`, EXT_DISPLAY, { timeOut: 10000 });
+                continue;
+            }
+
             if (change.action === 'add') {
                 const uids = Object.keys(data.entries).map(Number);
                 const newUid = uids.length ? Math.max(...uids) + 1 : 1;
@@ -575,40 +676,54 @@
                     case_sensitive: null, automation_id: '', role: null,
                     vectorized: false, sticky: null, cooldown: null, delay: null,
                 };
+                console.log(`[${EXT_DISPLAY}] applyLBChanges: ADD uid=${newUid} in "${bookName}"`);
                 bookCache[bookName] = data;
-            } else if (change.action === 'edit' && origEntry) {
+                successfulChanges.push(change);
+            } else if (change.action === 'edit') {
+                if (!origEntry) {
+                    const msg = `Entry not found for edit: "${change.name || change.uid || '?'}" in "${bookName}"`;
+                    toastr.error(`[LB] ${msg}`, EXT_DISPLAY, { timeOut: 10000 });
+                    console.error(`[${EXT_DISPLAY}] applyLBChanges: ${msg}. Available:`, Object.values(data.entries || {}).map(e => ({ uid: e.uid, comment: e.comment })));
+                    continue;
+                }
                 if (change.name !== undefined) origEntry.comment = change.name;
                 if (change.triggers !== undefined) origEntry.key = change.triggers;
                 if (change.content !== undefined) origEntry.content = change.content;
+                console.log(`[${EXT_DISPLAY}] applyLBChanges: EDIT uid=${origEntry.uid} in "${bookName}"`);
                 bookCache[bookName] = data;
-            } else if (change.action === 'delete' && origEntry) {
+                successfulChanges.push(change);
+            } else if (change.action === 'delete') {
+                if (!origEntry) {
+                    toastr.warning(`[LB] Entry not found for delete: "${change.name || change.uid || '?'}" in "${bookName}"`, EXT_DISPLAY, { timeOut: 8000 });
+                    continue;
+                }
                 delete data.entries[origEntry.uid];
+                console.log(`[${EXT_DISPLAY}] applyLBChanges: DELETE uid=${origEntry.uid} in "${bookName}"`);
                 bookCache[bookName] = data;
+                successfulChanges.push(change);
+            } else {
+                toastr.warning(`[LB] Unknown action: "${change.action}"`, EXT_DISPLAY, { timeOut: 6000 });
             }
         }
-        for (const [name, data] of Object.entries(bookCache)) await saveWorldInfoBook(name, data);
 
-        try {
-            const session = getCurrentSession();
-            const icons = { add: '✚', edit: '✎', delete: '✕' };
-            const newLines = changes.map(c => `${icons[c.action] || '·'} **${escHtml(c.name || `Entry #${c.uid || '?'}`)}** in \`${escHtml(c.worldName || '?')}\``);
+        if (changes.length > 0 && !Object.keys(bookCache).length) {
+            toastr.warning('[LB] No changes were applied — see browser console (F12) for details', EXT_DISPLAY, { timeOut: 10000 });
+            return;
+        }
 
-            const lastMsg = session.messages[session.messages.length - 1];
-            if (lastMsg && lastMsg.isLBHistory) {
-                if (!lastMsg.appliedLines) lastMsg.appliedLines = [];
-                lastMsg.appliedLines.push(...newLines);
-                const total = lastMsg.appliedLines.length;
-                lastMsg.content = `**Lorebook Updated** — ${total} change${total !== 1 ? 's' : ''} applied:\n${lastMsg.appliedLines.join('\n')}`;
-                updateMessage(session, lastMsg.id, lastMsg.content);
-                
-                const msgEl = document.querySelector(`.scp-msg[data-id="${lastMsg.id}"] .scp-msg-content`);
-                if (msgEl) msgEl.innerHTML = renderMarkdown(lastMsg.content);
-            } else {
-                const histText = `**Lorebook Updated** — ${changes.length} change${changes.length !== 1 ? 's' : ''} applied:\n${newLines.join('\n')}`;
-                const histMsg = addMessage(session, 'assistant', histText, { isLBHistory: true, appliedLines: [...newLines] });
-                appendLBHistoryEl(histMsg);
+        for (const [name, data] of Object.entries(bookCache)) {
+            try {
+                await saveWorldInfoBook(name, data);
+                console.log(`[${EXT_DISPLAY}] applyLBChanges: saved "${name}" OK`);
+            } catch (e) {
+                toastr.error(`[LB] Save failed for "${name}": ${e.message}`, EXT_DISPLAY, { timeOut: 12000 });
+                console.error(`[${EXT_DISPLAY}] applyLBChanges: save error for "${name}":`, e);
             }
-        } catch (_) {}
+        }
+
+        if (successfulChanges.length > 0) {
+            logLBHistoryChanges(successfulChanges, 'Accepted');
+        }
     }
 
     // ─── Diff Engine ─────────────────────────────────────────────────────────────
@@ -984,7 +1099,10 @@
         document.querySelector(`.scp-lb-proposal-card[data-for="${msgEl.dataset.id}"]`)?.remove();
 
         const editableChanges = changes.map(c => ({ ...c }));
-        const itemStates = editableChanges.map(() => 'pending'); // 'pending'|'applied'|'rejected'
+        const _initSess = getCurrentSession();
+        const _initMsg = _initSess.messages.find(m => m.id === msgEl.dataset.id);
+        const _savedStates = _initMsg?.lbChangesState || {};
+        const itemStates = editableChanges.map((_, i) => _savedStates[i] || 'pending');
         const actionLabels = { add: '+ Add', edit: '✎ Edit', delete: '✕ Remove' };
 
         const card = document.createElement('div');
@@ -995,6 +1113,17 @@
             const session = getCurrentSession();
             const msg = session.messages.find(m => m.id === card.dataset.for);
             if (msg) { msg.content = stripLBChangesBlock(msg.content); saveSettings(); }
+        };
+
+        const persistState = () => {
+            const sess = getCurrentSession();
+            const msg = sess.messages.find(m => m.id === card.dataset.for);
+            if (msg) {
+                msg.lbChangesState = Object.fromEntries(
+                    itemStates.map((s, i) => [i, s]).filter(([, s]) => s !== 'pending')
+                );
+                saveSettings();
+            }
         };
 
         const getPendingCount = () => itemStates.filter(s => s === 'pending').length;
@@ -1023,7 +1152,13 @@
         const dismissBtn = document.createElement('button');
         dismissBtn.className = 'scp-lb-proposal-dismiss';
         dismissBtn.innerHTML = I.x; dismissBtn.title = 'Dismiss';
-        dismissBtn.addEventListener('click', () => { stripAndSave(); card.remove(); });
+        dismissBtn.addEventListener('click', () => {
+            const dismissedChanges = editableChanges.filter((_, i) => itemStates[i] === 'pending');
+            if (dismissedChanges.length > 0) {
+                logLBHistoryChanges(dismissedChanges, 'Dismissed');
+            }
+            stripAndSave(); card.remove();
+        });
 
         header.appendChild(headerLeft); header.appendChild(dismissBtn);
 
@@ -1044,8 +1179,163 @@
             itemMeta.style.cssText = 'display:flex;align-items:center;gap:8px;flex:1;min-width:0;flex-wrap:wrap';
             itemMeta.innerHTML = `
                 <span class="scp-lb-proposal-action">${escHtml(actionLabels[c.action] || c.action || '?')}</span>
-                <span class="scp-lb-proposal-name">${escHtml(c.name || c.originalName || `Entry #${c.uid || '?'}`)}</span>
-                <span class="scp-lb-proposal-world">in ${escHtml(c.worldName || '?')}</span>`;
+                <span class="scp-lb-proposal-name">${escHtml(c.name || c.originalName || `Entry #${c.uid || '?'}`)}</span>`;
+
+            // ── Inline lorebook dropdown (replaces static "in BookName" span) ──
+            const _activeBooks = getActiveLorebookNames();
+            const _currentBook = editableChanges[ci].worldName || '';
+
+            const worldDd = document.createElement('div');
+            worldDd.className = 'scp-lb-proposal-world-dd';
+
+            const worldTrigger = document.createElement('button');
+            worldTrigger.className = 'scp-lb-proposal-world-trigger';
+            worldTrigger.type = 'button';
+
+            const worldTriggerText = document.createElement('span');
+            worldTriggerText.className = 'scp-lb-proposal-world-trigger-text';
+            worldTriggerText.textContent = `in ${getDisplayName(_currentBook) || '?'}`;
+
+            const worldChevronEl = document.createElement('span');
+            worldChevronEl.className = 'scp-lb-proposal-world-chevron';
+            worldChevronEl.innerHTML = I.chevron;
+
+            worldTrigger.appendChild(worldTriggerText);
+            worldTrigger.appendChild(worldChevronEl);
+
+            const worldPanel = document.createElement('div');
+            worldPanel.className = 'scp-lb-proposal-world-panel';
+
+            // Track current value separately for "new" lorebook entries
+            let _selectedBook = _currentBook;
+
+            const buildWorldPanelItems = (items) => {
+                worldPanel.innerHTML = '';
+
+                if (!items.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'scp-lb-proposal-world-empty';
+                    empty.textContent = 'No active lorebooks';
+                    worldPanel.appendChild(empty);
+                }
+
+                items.forEach(name => {
+                    const item2 = document.createElement('div');
+                    item2.className = `scp-lb-proposal-world-item${name === _selectedBook ? ' active' : ''}`;
+                    item2.dataset.value = name;
+
+                    const dot = document.createElement('span');
+                    dot.className = 'scp-lb-proposal-world-item-dot';
+                    const label = document.createElement('span');
+                    label.textContent = getDisplayName(name);
+
+                    item2.appendChild(dot);
+                    item2.appendChild(label);
+                    item2.addEventListener('click', () => selectBook(name));
+                    worldPanel.appendChild(item2);
+                });
+
+                if (c.action === 'add') {
+                    const sep = document.createElement('div');
+                    sep.className = 'scp-lb-proposal-world-sep';
+                    worldPanel.appendChild(sep);
+
+                    const newItem = document.createElement('div');
+                    newItem.className = 'scp-lb-proposal-world-item scp-lb-proposal-world-new';
+                    newItem.innerHTML = `<span>${I.plus}</span><span>Create new lorebook…</span>`;
+                    newItem.addEventListener('click', async () => {
+                        closeWorldPanel();
+                        const name = await showCustomDialog({ type: 'prompt', title: 'New Lorebook Name', message: 'Enter name for the new lorebook:', placeholder: 'My Lorebook' });
+                        if (name?.trim()) {
+                            const n = name.trim();
+                            _activeBooks.push(n);
+                            buildWorldPanelItems(_activeBooks);
+                            selectBook(n);
+                        }
+                    });
+                    worldPanel.appendChild(newItem);
+                }
+            };
+
+            const closeWorldPanel = () => {
+                worldPanel.classList.remove('open');
+                worldTrigger.classList.remove('open');
+            };
+
+            const openWorldPanel = () => {
+                // Position panel relative to trigger using fixed coords
+                const rect = worldTrigger.getBoundingClientRect();
+                worldPanel.style.top = `${rect.bottom + 4}px`;
+                worldPanel.style.left = `${rect.left}px`;
+                worldPanel.classList.add('open');
+                worldTrigger.classList.add('open');
+            };
+
+            const _validateBookEntry = async (bookName) => {
+                worldTrigger.classList.add('loading');
+                // Use the exact same resolution as applyLBChanges to guarantee consistency
+                const resolved = await resolveLBChangeTarget({ ...editableChanges[ci], worldName: bookName });
+                worldTrigger.classList.remove('loading');
+
+                const found = !!resolved.origEntry;
+
+                // Fallback may have resolved the entry in a different book — sync the UI
+                if (found && resolved.bookName && resolved.bookName !== bookName) {
+                    editableChanges[ci].worldName = resolved.bookName;
+                    _selectedBook = resolved.bookName;
+                    worldPanel.querySelectorAll('.scp-lb-proposal-world-item').forEach(el => {
+                        el.classList.toggle('active', el.dataset.value === resolved.bookName);
+                    });
+                    worldTriggerText.textContent = `in ${getDisplayName(resolved.bookName)}`;
+                    toastr.info(
+                        `Entry found in "<b>${escHtml(getDisplayName(resolved.bookName))}</b>" instead of "<b>${escHtml(getDisplayName(bookName))}</b>" — lorebook switched automatically.`,
+                        EXT_DISPLAY,
+                        { timeOut: 6000, escapeHtml: false }
+                    );
+                } else {
+                    worldTriggerText.textContent = found
+                        ? `in ${getDisplayName(bookName)}`
+                        : `in ${getDisplayName(bookName)} ⚠`;
+                }
+
+                worldTrigger.classList.toggle('warn', !found);
+                applyItemBtn.disabled = !found;
+                applyItemBtn.title = found ? 'Apply this change' : 'Entry not found in selected lorebook';
+            };
+
+            const selectBook = async (name) => {
+                _selectedBook = name;
+                editableChanges[ci].worldName = name;
+                worldTriggerText.textContent = `in ${getDisplayName(name)}`;
+                worldTrigger.classList.remove('warn');
+                // Update active state in panel
+                worldPanel.querySelectorAll('.scp-lb-proposal-world-item').forEach(el => {
+                    el.classList.toggle('active', el.dataset.value === name);
+                });
+                closeWorldPanel();
+                if (c.action === 'edit' || c.action === 'delete') await _validateBookEntry(name);
+            };
+
+            worldTrigger.addEventListener('click', e => {
+                e.stopPropagation();
+                const isOpen = worldPanel.classList.contains('open');
+                // Close all other world panels
+                document.querySelectorAll('.scp-lb-proposal-world-panel.open').forEach(p => {
+                    p.classList.remove('open');
+                    p.previousElementSibling?.classList.remove('open');
+                });
+                if (!isOpen) openWorldPanel();
+            });
+
+            // If AI-proposed book isn't active, add it to the list
+            const _allBooks = [..._activeBooks];
+            if (_currentBook && !_activeBooks.includes(_currentBook)) _allBooks.unshift(_currentBook);
+
+            buildWorldPanelItems(_allBooks);
+
+            worldDd.appendChild(worldTrigger);
+            worldDd.appendChild(worldPanel);
+            // worldDd is appended after itemHeader — see below
 
             const itemBtns = document.createElement('div');
             itemBtns.className = 'scp-lb-proposal-item-btns';
@@ -1104,6 +1394,7 @@
                     item.classList.add('scp-lb-item-applied');
                     itemBtns.querySelectorAll('button').forEach(b => { b.disabled = true; });
                     _wiCache = {};
+                    persistState();
                     updateCountBadge();
                     updateFooterBtns();
                     checkAllResolved();
@@ -1124,6 +1415,10 @@
                 itemStates[ci] = 'rejected';
                 item.classList.add('scp-lb-item-rejected');
                 itemBtns.querySelectorAll('button').forEach(b => { b.disabled = true; });
+
+                logLBHistoryChanges([editableChanges[ci]], 'Rejected');
+
+                persistState();
                 updateCountBadge();
                 updateFooterBtns();
                 checkAllResolved();
@@ -1134,13 +1429,28 @@
             itemHeader.appendChild(itemMeta);
             itemHeader.appendChild(itemBtns);
             item.appendChild(itemHeader);
+            item.appendChild(worldDd);
 
             // Preview / triggers
             let previewEl = null, triggersEl = null;
             if (c.content) {
                 previewEl = document.createElement('div');
                 previewEl.className = 'scp-lb-proposal-preview';
-                previewEl.textContent = c.content.slice(0, 120) + (c.content.length > 120 ? '…' : '');
+                const isLong = c.content.length > 120;
+                previewEl.textContent = isLong ? c.content.slice(0, 120) + '…' : c.content;
+                if (isLong) {
+                    let _expanded = false;
+                    previewEl.title = 'Click to expand';
+                    previewEl.style.cursor = 'pointer';
+                    previewEl.addEventListener('click', e => {
+                        e.stopPropagation();
+                        _expanded = !_expanded;
+                        previewEl.textContent = _expanded ? c.content : c.content.slice(0, 120) + '…';
+                        previewEl.style.whiteSpace = _expanded ? 'pre-wrap' : '';
+                        previewEl.style.fontStyle = _expanded ? 'normal' : '';
+                        previewEl.title = _expanded ? 'Click to collapse' : 'Click to expand';
+                    });
+                }
                 item.appendChild(previewEl);
             }
             if (c.triggers?.length) {
@@ -1200,6 +1510,22 @@
 
             list.appendChild(item);
             itemEls.push(item);
+
+            // Run initial validation immediately for edit/delete so Apply is never incorrectly enabled
+            if ((c.action === 'edit' || c.action === 'delete') && itemStates[ci] === 'pending') {
+                _validateBookEntry(_selectedBook).catch(() => {});
+            }
+        });
+
+        // Restore persisted visual states
+        itemEls.forEach((el, i) => {
+            if (itemStates[i] === 'applied') {
+                el.classList.add('scp-lb-item-applied');
+                el.querySelectorAll('button').forEach(b => { b.disabled = true; });
+            } else if (itemStates[i] === 'rejected') {
+                el.classList.add('scp-lb-item-rejected');
+                el.querySelectorAll('button').forEach(b => { b.disabled = true; });
+            }
         });
 
         // ── Footer ──
@@ -1231,6 +1557,7 @@
                 await applyLBChanges(pending);
                 itemStates.forEach((s, i) => { if (s === 'pending') { itemStates[i] = 'applied'; itemEls[i].classList.add('scp-lb-item-applied'); itemEls[i].querySelectorAll('button').forEach(b => { b.disabled = true; }); } });
                 _wiCache = {};
+                persistState();
                 updateCountBadge(); updateFooterBtns(); checkAllResolved();
             } catch (e) {
                 toastr.error(`Failed: ${e.message}`, EXT_DISPLAY);
@@ -1239,7 +1566,19 @@
         });
 
         rejectAllBtn.addEventListener('click', () => {
-            itemStates.forEach((s, i) => { if (s === 'pending') { itemStates[i] = 'rejected'; itemEls[i].classList.add('scp-lb-item-rejected'); itemEls[i].querySelectorAll('button').forEach(b => { b.disabled = true; }); } });
+            const rejectedChanges =[];
+            itemStates.forEach((s, i) => {
+                if (s === 'pending') {
+                    itemStates[i] = 'rejected';
+                    itemEls[i].classList.add('scp-lb-item-rejected');
+                    itemEls[i].querySelectorAll('button').forEach(b => { b.disabled = true; });
+                    rejectedChanges.push(editableChanges[i]);
+                }
+            });
+            if (rejectedChanges.length > 0) {
+                logLBHistoryChanges(rejectedChanges, 'Rejected');
+            }
+            persistState();
             updateCountBadge(); updateFooterBtns(); checkAllResolved();
         });
 
@@ -1258,9 +1597,8 @@
         document.getElementById('scp-lb-ai-toggle')?.classList.toggle('active', !!s.lorebookAIManageEnabled);
         if (document.getElementById('scp-lb-search')) document.getElementById('scp-lb-search').value = _lbSearchQuery;
         _wiCache = {};
-        await refreshLorebookList();
-        if (_lbActiveBook) await renderEntryList(_lbActiveBook, _lbSearchQuery);
-        // Background context refresh to update _lastActiveEntries for accurate indicators
+        await refreshLorebookList().catch(e => console.error(`[${EXT_DISPLAY}] LB list:`, e));
+        if (_lbActiveBook) await renderEntryList(_lbActiveBook, _lbSearchQuery).catch(() => {});
         buildLorebookContextBlock(s).then(() => {
             if (_lbActiveBook) renderEntryList(_lbActiveBook, _lbSearchQuery);
         }).catch(() => {});
@@ -1454,6 +1792,8 @@
             btn.className = `scp-lb-entry-toggle-btn${isConstant ? ' forced-on' : ''}`;
             rowEl.classList.toggle('lb-in-ctx', isInCtx);
         }
+
+        updateMsgCount(getCurrentSession());
     }
 
     function showEntryDetail(entry, bookName) {
@@ -1523,6 +1863,7 @@
         toastr.success('Entry saved', EXT_DISPLAY);
         document.getElementById('scp-lb-detail-title').textContent = entry.comment || `Entry #${entry.uid}`;
         renderEntryList(_lbEntryDetailBook, _lbSearchQuery);
+        updateMsgCount(getCurrentSession());
     }
 
     async function deleteEntryDetail() {
@@ -1537,6 +1878,7 @@
         document.getElementById('scp-lb-entry-detail').style.display = 'none';
         document.getElementById('scp-lb-entries').style.display = '';
         renderEntryList(_lbEntryDetailBook, _lbSearchQuery);
+        updateMsgCount(getCurrentSession());
     }
 
     async function addNewEntry() {
@@ -1580,17 +1922,42 @@
 
     function setupLorebookManagerListeners() {
         document.getElementById('scp-lb-close')?.addEventListener('click', closeLorebookManager);
-        document.getElementById('scp-lb-overlay')?.addEventListener('click', e => {
-            if (e.target === document.getElementById('scp-lb-overlay')) closeLorebookManager();
-        });
+        const lbOverlay = document.getElementById('scp-lb-overlay');
+        if (lbOverlay) {
+            let _lbOverlayTouchStart = null;
+            lbOverlay.addEventListener('touchstart', e => {
+                if (e.target === lbOverlay) _lbOverlayTouchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }, { passive: true });
+            lbOverlay.addEventListener('touchend', e => {
+                if (e.target === lbOverlay && _lbOverlayTouchStart) {
+                    const dx = Math.abs(e.changedTouches[0].clientX - _lbOverlayTouchStart.x);
+                    const dy = Math.abs(e.changedTouches[0].clientY - _lbOverlayTouchStart.y);
+                    if (dx < 8 && dy < 8) closeLorebookManager();
+                }
+                _lbOverlayTouchStart = null;
+            }, { passive: true });
+            lbOverlay.addEventListener('click', e => {
+                if (e.target === lbOverlay) closeLorebookManager();
+            });
+        }
 
         const diffModal = document.getElementById('scp-diff-modal');
         document.getElementById('scp-diff-close')?.addEventListener('click', () => { if (diffModal) diffModal.style.display = 'none'; });
         diffModal?.addEventListener('click', e => { if (e.target === diffModal) diffModal.style.display = 'none'; });
-        document.getElementById('scp-lb-auto-kw-toggle')?.addEventListener('click', () => {
-            const s = getSettings(); s.lorebookAutoKeyword = !s.lorebookAutoKeyword; saveSettings();
+        document.getElementById('scp-lb-auto-kw-toggle')?.addEventListener('click', async () => {
+            const s = getSettings(); 
+            s.lorebookAutoKeyword = !s.lorebookAutoKeyword; 
+            saveSettings();
             document.getElementById('scp-lb-auto-kw-toggle').classList.toggle('active', s.lorebookAutoKeyword);
             updateLBFooterInfo();
+            
+            await buildLorebookContextBlock(s);
+            
+            if (_lbActiveBook) {
+                await renderEntryList(_lbActiveBook, _lbSearchQuery);
+            }
+            
+            updateMsgCount(getCurrentSession());
         });
         document.getElementById('scp-lb-ai-toggle')?.addEventListener('click', () => {
             const s = getSettings(); s.lorebookAIManageEnabled = !s.lorebookAIManageEnabled; saveSettings();
@@ -1614,12 +1981,14 @@
             const s = getSettings();
             Object.values(_wiCache[_lbActiveBook].entries).forEach(e => { s.lorebookEntryOverrides[`${_lbActiveBook}_${e.uid}`] = true; });
             saveSettings(); renderEntryList(_lbActiveBook, _lbSearchQuery);
+            updateMsgCount(getCurrentSession());
         });
         document.getElementById('scp-lb-disable-all')?.addEventListener('click', () => {
             if (!_lbActiveBook || !_wiCache[_lbActiveBook]) return;
             const s = getSettings();
             Object.values(_wiCache[_lbActiveBook].entries).forEach(e => { s.lorebookEntryOverrides[`${_lbActiveBook}_${e.uid}`] = false; });
             saveSettings(); renderEntryList(_lbActiveBook, _lbSearchQuery);
+            updateMsgCount(getCurrentSession());
         });
         document.getElementById('scp-lb-reset-overrides')?.addEventListener('click', async () => {
             if (!_lbActiveBook) return;
@@ -1628,6 +1997,7 @@
             const s = getSettings();
             if (_wiCache[_lbActiveBook]) Object.values(_wiCache[_lbActiveBook].entries).forEach(e => { delete s.lorebookEntryOverrides[`${_lbActiveBook}_${e.uid}`]; });
             saveSettings(); renderEntryList(_lbActiveBook, _lbSearchQuery);
+            updateMsgCount(getCurrentSession());
         });
         document.getElementById('scp-lb-add-entry')?.addEventListener('click', addNewEntry);
         document.getElementById('scp-lb-back')?.addEventListener('click', async () => {
@@ -1996,6 +2366,9 @@
             if (sp) parts.push(`\n\n<st_system_prompt>\n${sp}\n</st_system_prompt>`);
         }
 
+        const lbBlock = await buildLorebookContextBlock(settings);
+        if (lbBlock) parts.push(lbBlock);
+
         if (settings.includeCharacterCard && charInfo) {
             let block = `Name: ${charInfo.name}`;
             if (charInfo.description) block += `\nDescription:\n${charInfo.description}`;
@@ -2014,9 +2387,6 @@
             const an = getAuthorsNote();
             if (an) parts.push(`\n\n<author_notes>\n${an}\n</author_notes>`);
         }
-
-        const lbBlock = await buildLorebookContextBlock(settings);
-        if (lbBlock) parts.push(lbBlock);
 
         const aiInstructions = buildLBAIInstructions(settings);
         if (aiInstructions) parts.push(aiInstructions);
@@ -2263,9 +2633,17 @@
     let windowEl, iconEl, modalEl;
 
     function injectUI() {
+        // Main window + icon + context modal inside wrapper
         const root = document.createElement('div');
-        root.innerHTML = buildWindowHTML() + buildLorebookManagerHTML();
+        root.innerHTML = buildWindowHTML();
         document.body.appendChild(root);
+
+        // LB overlay and diff modal appended directly to body —
+        // bypasses any ancestor with CSS transform that would break position:fixed
+        const lbRoot = document.createElement('div');
+        lbRoot.innerHTML = buildLorebookManagerHTML();
+        document.body.appendChild(lbRoot);
+
         windowEl = document.getElementById(WIN_ID);
         iconEl = document.getElementById(ICON_ID);
         modalEl = document.getElementById(MODAL_ID);
@@ -2837,118 +3215,147 @@
 
     function makeDraggable(handle, target) {
         let active = false, ox = 0, oy = 0, sl = 0, st = 0;
-        const onStart = e => {
+        let _rafId = null, _px = 0, _py = 0;
+
+        const flush = () => {
+            target.style.left = `${Math.max(0, _px)}px`;
+            target.style.top = `${Math.max(0, _py)}px`;
+            target.style.right = 'auto'; target.style.bottom = 'auto';
+            _rafId = null;
+        };
+
+        handle.addEventListener('pointerdown', e => {
             if (e.target.closest('.scp-hbtn,.scp-tbtn,select,input,button,.scp-opacity-wrap,.scp-rh,.scp-sess-dropdown,.scp-sess-wrap')) return;
             active = true;
             const r = target.getBoundingClientRect();
-            const c = getEvCoords(e);
-            ox = c.x; oy = c.y; sl = r.left; st = r.top;
-            document.addEventListener('mousemove', onMove, { passive: false });
-            document.addEventListener('touchmove', onMove, { passive: false });
-            document.addEventListener('mouseup', onUp);
-            document.addEventListener('touchend', onUp);
-            if (e.type === 'mousedown') e.preventDefault();
+            ox = e.clientX; oy = e.clientY; sl = r.left; st = r.top;
+            handle.setPointerCapture(e.pointerId);
+            target.classList.add('scp-dragging');
+            e.preventDefault();
+        });
+
+        handle.addEventListener('pointermove', e => {
+            if (!active) return;
+            _px = sl + (e.clientX - ox); _py = st + (e.clientY - oy);
+            if (!_rafId) _rafId = requestAnimationFrame(flush);
+        });
+
+        const onEnd = () => {
+            if (!active) return;
+            active = false;
+            if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; flush(); }
+            target.classList.remove('scp-dragging');
+            saveWindowState();
         };
-        const onMove = e => { 
-            if (!active) return; 
-            if (e.cancelable) e.preventDefault();
-            const c = getEvCoords(e);
-            target.style.left = `${Math.max(0, sl + (c.x - ox))}px`; 
-            target.style.top = `${Math.max(0, st + (c.y - oy))}px`; 
-            target.style.right = 'auto'; target.style.bottom = 'auto'; 
-        };
-        const onUp = () => { 
-            active = false; 
-            document.removeEventListener('mousemove', onMove); 
-            document.removeEventListener('touchmove', onMove);
-            document.removeEventListener('mouseup', onUp); 
-            document.removeEventListener('touchend', onUp);
-            saveWindowState(); 
-        };
-        handle.addEventListener('mousedown', onStart);
-        handle.addEventListener('touchstart', onStart, { passive: false });
+
+        handle.addEventListener('pointerup', onEnd);
+        handle.addEventListener('pointercancel', onEnd);
+        handle.style.touchAction = 'none';
     }
 
     function makeResizable(target) {
+        const MIN_W = 320, MIN_H = 300;
         target.querySelectorAll('.scp-rh').forEach(h => {
-            const onStart = e => {
-                if (e.cancelable) e.preventDefault(); 
-                e.stopPropagation();
-                const dir = [...h.classList].find(c => /^scp-rh-\w/.test(c))?.replace('scp-rh-', '') || '';
-                const cStart = getEvCoords(e);
-                const sx = cStart.x, sy = cStart.y, r = target.getBoundingClientRect();
-                const sw = r.width, sh = r.height, sl = r.left, st = r.top, MIN_W = 320, MIN_H = 300;
-                
-                const onMove = me => {
-                    if (me.cancelable) me.preventDefault();
-                    const cMove = getEvCoords(me);
-                    const dx = cMove.x - sx, dy = cMove.y - sy;
-                    if (dir.includes('e')) target.style.width = `${Math.max(MIN_W, sw + dx)}px`;
-                    if (dir.includes('s')) target.style.height = `${Math.max(MIN_H, sh + dy)}px`;
-                    if (dir.includes('w')) { const nw = Math.max(MIN_W, sw - dx); target.style.width = `${nw}px`; target.style.left = `${sl + (sw - nw)}px`; target.style.right = 'auto'; }
-                    if (dir.includes('n')) { const nh = Math.max(MIN_H, sh - dy); target.style.height = `${nh}px`; target.style.top = `${st + (sh - nh)}px`; }
-                };
-                const onUp = () => { 
-                    document.removeEventListener('mousemove', onMove); 
-                    document.removeEventListener('touchmove', onMove);
-                    document.removeEventListener('mouseup', onUp); 
-                    document.removeEventListener('touchend', onUp);
-                    saveWindowState(); 
-                };
-                document.addEventListener('mousemove', onMove, { passive: false });
-                document.addEventListener('touchmove', onMove, { passive: false });
-                document.addEventListener('mouseup', onUp);
-                document.addEventListener('touchend', onUp);
+            const dir = [...h.classList].find(c => /^scp-rh-\w/.test(c))?.replace('scp-rh-', '') || '';
+            let active = false, sw, sh, sl, st, sx, sy, _rafId = null, _s = {};
+
+            const flush = () => {
+                if (_s.w !== undefined) target.style.width = `${_s.w}px`;
+                if (_s.h !== undefined) target.style.height = `${_s.h}px`;
+                if (_s.l !== undefined) { target.style.left = `${_s.l}px`; target.style.right = 'auto'; }
+                if (_s.t !== undefined) target.style.top = `${_s.t}px`;
+                _rafId = null;
             };
-            h.addEventListener('mousedown', onStart);
-            h.addEventListener('touchstart', onStart, { passive: false });
+
+            h.addEventListener('pointerdown', e => {
+                e.preventDefault(); e.stopPropagation();
+                active = true; _s = {};
+                const r = target.getBoundingClientRect();
+                sx = e.clientX; sy = e.clientY; sw = r.width; sh = r.height; sl = r.left; st = r.top;
+                h.setPointerCapture(e.pointerId);
+                target.classList.add('scp-resizing');
+            });
+
+            h.addEventListener('pointermove', e => {
+                if (!active) return;
+                const dx = e.clientX - sx, dy = e.clientY - sy;
+                _s = {};
+                if (dir.includes('e')) _s.w = Math.max(MIN_W, sw + dx);
+                if (dir.includes('s')) _s.h = Math.max(MIN_H, sh + dy);
+                if (dir.includes('w')) { const nw = Math.max(MIN_W, sw - dx); _s.w = nw; _s.l = sl + (sw - nw); }
+                if (dir.includes('n')) { const nh = Math.max(MIN_H, sh - dy); _s.h = nh; _s.t = st + (sh - nh); }
+                if (!_rafId) _rafId = requestAnimationFrame(flush);
+            });
+
+            h.addEventListener('pointerup', e => {
+                if (!active) return;
+                active = false;
+                if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; flush(); }
+                target.classList.remove('scp-resizing');
+                saveWindowState();
+            });
+
+            h.addEventListener('pointercancel', () => {
+                active = false;
+                if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+                target.classList.remove('scp-resizing');
+            });
+
+            h.style.touchAction = 'none';
         });
     }
 
     function makeIconDraggable(iconTarget) {
         let active = false, moved = false, ox = 0, oy = 0, sl = 0, st = 0;
-        const onStart = e => {
-            if (e.type === 'mousedown' && e.button !== 0) return;
+        let _rafId = null, _px = 0, _py = 0;
+
+        const flush = () => {
+            iconTarget.style.left = `${_px}px`;
+            iconTarget.style.top = `${_py}px`;
+            iconTarget.style.right = 'auto'; iconTarget.style.bottom = 'auto';
+            _rafId = null;
+        };
+
+        iconTarget.addEventListener('pointerdown', e => {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
             active = true; moved = false;
             const r = iconTarget.getBoundingClientRect();
-            const c = getEvCoords(e);
-            ox = c.x; oy = c.y; sl = r.left; st = r.top;
-            
-            document.addEventListener('mousemove', onMove, { passive: false }); 
-            document.addEventListener('touchmove', onMove, { passive: false });
-            document.addEventListener('mouseup', onUp);
-            document.addEventListener('touchend', onUp);
-            if (e.type === 'mousedown') e.preventDefault();
-        };
-        const onMove = e => {
+            ox = e.clientX; oy = e.clientY; sl = r.left; st = r.top;
+            iconTarget.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        });
+
+        iconTarget.addEventListener('pointermove', e => {
             if (!active) return;
-            const c = getEvCoords(e);
-            const dx = c.x - ox; const dy = c.y - oy;
-            if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+            const dx = e.clientX - ox, dy = e.clientY - oy;
+            if (!moved && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) moved = true;
             if (moved) {
-                if (e.cancelable) e.preventDefault();
-                iconTarget.style.left = `${Math.max(0, Math.min(sl + dx, window.innerWidth - 46))}px`;
-                iconTarget.style.top = `${Math.max(0, Math.min(st + dy, window.innerHeight - 46))}px`;
-                iconTarget.style.right = 'auto'; iconTarget.style.bottom = 'auto';
+                _px = Math.max(0, Math.min(sl + dx, window.innerWidth - 46));
+                _py = Math.max(0, Math.min(st + dy, window.innerHeight - 46));
+                if (!_rafId) _rafId = requestAnimationFrame(flush);
             }
-        };
-        const onUp = () => {
+        });
+
+        iconTarget.addEventListener('pointerup', () => {
+            if (!active) return;
             active = false;
-            document.removeEventListener('mousemove', onMove); 
-            document.removeEventListener('touchmove', onMove);
-            document.removeEventListener('mouseup', onUp);
-            document.removeEventListener('touchend', onUp);
+            if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; flush(); }
             if (moved) {
                 const s = getSettings();
                 const r = iconTarget.getBoundingClientRect();
                 s.iconX = r.left; s.iconY = r.top;
                 saveSettings();
             } else {
-                toggleVisibility(); 
+                toggleVisibility();
             }
-        };
-        iconTarget.addEventListener('mousedown', onStart);
-        iconTarget.addEventListener('touchstart', onStart, { passive: false });
+        });
+
+        iconTarget.addEventListener('pointercancel', () => {
+            active = false; moved = false;
+            if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+        });
+
+        iconTarget.style.touchAction = 'none';
     }
 
     // ─── Theme ──────────────────────────────────────────────────────────────────
@@ -2975,17 +3382,20 @@
 
     function restoreWindowState() {
         const s = getSettings(); if (!windowEl) return;
+        const isMobile = window.innerWidth <= 900 || ('ontouchstart' in window && window.innerWidth <= 1366);
         
         const w = s.windowW || 440;
         const h = s.windowH || 600;
         
         if (s.windowX !== null) {
-            const maxLeft = Math.max(0, window.innerWidth - w);
+            const maxLeft = Math.max(0, window.innerWidth - (isMobile ? window.innerWidth * 0.94 : w));
             windowEl.style.left = `${Math.max(0, Math.min(s.windowX, maxLeft))}px`;
-
             const maxTop = Math.max(0, window.innerHeight - 100);
-            windowEl.style.top = `${Math.max(0, Math.min(s.windowY, maxTop))}px`;
-            
+            windowEl.style.top = `${Math.max(0, Math.min(s.windowY ?? 80, maxTop))}px`;
+            windowEl.style.right = 'auto';
+        } else if (isMobile) {
+            windowEl.style.left = '3vw';
+            windowEl.style.top = '8vh';
             windowEl.style.right = 'auto';
         }
         
@@ -2998,8 +3408,10 @@
             iconEl.style.bottom = 'auto';
         }
         
-        windowEl.style.width = `${w}px`;
-        windowEl.style.height = `${h}px`;
+        if (!isMobile) {
+            windowEl.style.width = `${w}px`;
+            windowEl.style.height = `${h}px`;
+        }
         windowEl.style.opacity = ((s.opacity || 95) / 100).toString();
         applyCustomTheme(s.customTheme || THEME_PRESETS.default);
     }
@@ -3008,7 +3420,7 @@
 
     function minimize() { const s = getSettings(); s.minimized = true; windowEl.style.display = 'none'; iconEl.style.display = 'flex'; saveSettings(); }
     function restoreFromMinimize() { const s = getSettings(); s.minimized = false; windowEl.style.display = 'flex'; iconEl.style.display = s.floatingIconPersistent ? 'flex' : 'none'; saveSettings(); scrollToBottom(); }
-    function hideWindow() { const s = getSettings(); s.windowVisible = false; s.minimized = false; windowEl.style.display = 'none'; iconEl.style.display = s.floatingIconPersistent ? 'flex' : 'none'; saveSettings(); }
+    function hideWindow() { const s = getSettings(); s.windowVisible = false; s.minimized = false; windowEl.style.display = 'none'; const isTouchDevice = 'ontouchstart' in window; iconEl.style.display = (s.floatingIconPersistent || isTouchDevice) ? 'flex' : 'none'; saveSettings(); }
     function showWindow() {
         const s = getSettings(); 
         if (!s.enabled) { toastr.warning('ST-Copilot is disabled.', EXT_DISPLAY); return; }
@@ -3111,13 +3523,31 @@
 
     // ─── Profile System ─────────────────────────────────────────────────────────
 
+    function isConfigProfileDirty() {
+        const s = getSettings();
+        if (!s.activeProfile || !s.profiles[s.activeProfile]) return false;
+        
+        const p = s.profiles[s.activeProfile];
+        const keys = [
+            'systemPrompt', 'includeSystemPrompt', 'includeAuthorsNote', 
+            'includeCharacterCard', 'includeUserPersonality', 'contextDepth', 
+            'localHistoryLimit', 'connectionSource', 'connectionProfileId', 'maxTokens'
+        ];
+        
+        for (const k of keys) {
+            if (String(s[k] || '') !== String(p[k] || '')) return true;
+        }
+        
+        return false;
+    }
+
     function saveProfile(name) {
         const s = getSettings();
         s.profiles[name] = {
             systemPrompt: s.systemPrompt, includeSystemPrompt: s.includeSystemPrompt,
             includeAuthorsNote: s.includeAuthorsNote, includeCharacterCard: s.includeCharacterCard,
             includeUserPersonality: s.includeUserPersonality, contextDepth: s.contextDepth,
-            localHistoryLimit: s.localHistoryLimit, customTheme: { ...s.customTheme },
+            localHistoryLimit: s.localHistoryLimit,
             connectionSource: s.connectionSource, connectionProfileId: s.connectionProfileId,
             maxTokens: s.maxTokens,
         };
@@ -3126,8 +3556,11 @@
 
     function loadProfile(name) {
         const s = getSettings(); const p = s.profiles[name]; if (!p) return;
-        Object.assign(s, p); s.activeProfile = name;
-        if (p.customTheme) applyCustomTheme(p.customTheme);
+        
+        const profileData = { ...p };
+        delete profileData.customTheme;
+        
+        Object.assign(s, profileData); s.activeProfile = name;
         saveSettings();
         if (typeof updateSettingsUI === 'function') updateSettingsUI();
     }
@@ -3148,7 +3581,7 @@
                 systemPrompt: DEFAULT_SYSTEM_PROMPT, includeSystemPrompt: true,
                 includeAuthorsNote: true, includeCharacterCard: true,
                 includeUserPersonality: true, contextDepth: 15,
-                localHistoryLimit: 50, customTheme: { ...THEME_PRESETS.default },
+                localHistoryLimit: 50,
                 connectionSource: 'default', connectionProfileId: '',
                 maxTokens: 2048,
             };
@@ -3201,6 +3634,23 @@
 
     // ─── Theme Editor ────────────────────────────────────────────────────────────
 
+    function isThemeDirty() {
+        const s = getSettings();
+        const current = s.customTheme || {};
+        
+        if (s.activeThemeProfile && s.savedThemes[s.activeThemeProfile]) {
+            const saved = s.savedThemes[s.activeThemeProfile];
+            return THEME_VAR_DEFS.some(def => (current[def.key] || '') !== (saved[def.key] || ''));
+        }
+        
+        for (const preset of Object.values(THEME_PRESETS)) {
+            const isMatch = THEME_VAR_DEFS.every(def => (current[def.key] || '') === (preset[def.key] || ''));
+            if (isMatch) return false;
+        }
+        
+        return true;
+    }
+
     function buildThemeEditor() {
         const container = $('scp-theme-section'); if (!container) return;
         container.innerHTML = '';
@@ -3233,8 +3683,21 @@
             sel.appendChild(opt);
         }
 
-        sel.addEventListener('change', () => {
+        sel.addEventListener('change', async () => {
             const name = sel.value;
+            
+            if (isThemeDirty()) {
+                const ok = await showCustomDialog({ 
+                    type: 'confirm', 
+                    title: 'Unsaved Changes', 
+                    message: 'You have unsaved changes in your current theme. Are you sure you want to switch?' 
+                });
+                if (!ok) {
+                    sel.value = s.activeThemeProfile || '';
+                    return;
+                }
+            }
+
             if (name && s.savedThemes[name]) {
                 s.customTheme = { ...s.savedThemes[name] };
                 s.activeThemeProfile = name;
@@ -3293,12 +3756,23 @@
         for (const [name, preset] of Object.entries(THEME_PRESETS)) {
             const btn = document.createElement('button');
             btn.className = 'scp-preset-pill'; btn.textContent = preset.label; btn.dataset.preset = name;
-            btn.addEventListener('click', () => {
+            
+            btn.addEventListener('click', async () => {
+                if (isThemeDirty()) {
+                    const ok = await showCustomDialog({ 
+                        type: 'confirm', 
+                        title: 'Unsaved Changes', 
+                        message: 'You have unsaved changes in your current theme. Are you sure you want to switch and lose them?' 
+                    });
+                    if (!ok) return;
+                }
+
                 const s2 = getSettings();
                 s2.customTheme = { ...THEME_PRESETS[name] };
                 s2.activeThemeProfile = '';
                 saveSettings(); applyCustomTheme(s2.customTheme); buildThemeEditor();
             });
+            
             btnsEl.appendChild(btn);
         }
 
@@ -3514,8 +3988,22 @@
         // Config profiles
         refreshProfilesDropdown();
 
-        $('scp-profile-select')?.addEventListener('change', () => {
-            const name = $('scp-profile-select').value;
+        $('scp-profile-select')?.addEventListener('change', async () => {
+            const sel = $('scp-profile-select');
+            const name = sel.value;
+            
+            if (isConfigProfileDirty()) {
+                const ok = await showCustomDialog({ 
+                    type: 'confirm', 
+                    title: 'Unsaved Configuration', 
+                    message: 'You have unsaved changes in your current configuration profile. Are you sure you want to switch?' 
+                });
+                if (!ok) {
+                    sel.value = getSettings().activeProfile || '';
+                    return;
+                }
+            }
+            
             if (name) loadProfile(name);
             updateBindingSection();
         });
@@ -3542,7 +4030,7 @@
                 systemPrompt: DEFAULT_SYSTEM_PROMPT, includeSystemPrompt: true,
                 includeAuthorsNote: true, includeCharacterCard: true,
                 includeUserPersonality: true, contextDepth: 15,
-                localHistoryLimit: 50, customTheme: { ...THEME_PRESETS.default },
+                localHistoryLimit: 50,
                 connectionSource: 'default', connectionProfileId: '',
                 maxTokens: 2048,
             };
@@ -3721,8 +4209,13 @@
         document.addEventListener('click', e => {
             const dd = $('scp-sess-dropdown');
             if (dd && !dd.contains(e.target)) closeSessPanel();
+            if (!e.target.closest('.scp-lb-proposal-world-dd')) {
+                document.querySelectorAll('.scp-lb-proposal-world-panel.open').forEach(p => {
+                    p.classList.remove('open');
+                    p.previousElementSibling?.classList.remove('open');
+                });
+            }
         });
-
         $('scp-new-sess-btn')?.addEventListener('click', async () => {
             closeSessPanel();
             const { charId, chatId } = getBindingKey();
@@ -3772,7 +4265,17 @@
         // Actions
         $('scp-inspect-btn')?.addEventListener('click', openInspector);
         $('scp-regen-btn')?.addEventListener('click', handleRegen);
-        $('scp-lb-btn')?.addEventListener('click', () => openLorebookManager());
+        const lbBtn = $('scp-lb-btn');
+        if (lbBtn) {
+            let _lbTouchPending = false;
+            lbBtn.addEventListener('touchend', e => {
+                e.preventDefault();
+                _lbTouchPending = true;
+                openLorebookManager();
+                setTimeout(() => { _lbTouchPending = false; }, 400);
+            }, { passive: false });
+            lbBtn.addEventListener('click', () => { if (!_lbTouchPending) openLorebookManager(); });
+        }
         $('scp-stop-btn')?.addEventListener('click', () => {
             _abortController?.abort();
             const { stopGeneration } = SillyTavern.getContext();
