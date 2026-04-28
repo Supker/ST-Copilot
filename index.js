@@ -123,6 +123,19 @@
             shadow: '0 24px 64px rgba(0,0,0,0.8), 0 4px 16px rgba(0,0,0,0.6)',
             border: '1px solid rgba(255,255,255,0.06)', font: '',
         },
+        darksky: {
+            label: 'Dark Sky',
+            bg: 'rgba(0,0,0,0.85)', blur: 'blur(14px)',
+            text: '#e2e2e6', textMuted: 'rgb(176,176,176)',
+            accent: 'rgb(191,191,191)', accentDim: 'rgba(209,209,209,0.4)',
+            accentBg: 'rgba(112,112,112,0.08)',
+            headerBg: 'rgba(255,255,255,0.04)', toolbarBg: 'rgba(0,0,0,0.25)',
+            msgUserBg: 'rgba(214,214,214,0.1)', msgAiBg: 'rgba(214,214,214,0.03)',
+            inputBg: 'rgba(0,0,0,0.30)', codeBg: 'rgba(0,0,0,0.35)',
+            radius: '10px', danger: '#ff5c5c', success: '#4caf7d',
+            shadow: '0 24px 64px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4)',
+            border: '2px solid rgba(255,255,255,0.09)', font: '',
+        },
         glass: {
             label: 'Glass',
             bg: 'rgba(40,40,55,0.55)', blur: 'blur(22px) saturate(1.6)',
@@ -1756,7 +1769,7 @@
         const ctxEl = document.getElementById('scp-lb-footer-ctx');
         if (ctxEl) {
             ctxEl.textContent = activeEntryUids.size
-                ? `${activeEntryUids.size} entr${activeEntryUids.size !== 1 ? 'ies' : 'y'} active in last request`
+                ? `${activeEntryUids.size} entr${activeEntryUids.size !== 1 ? 'ies' : 'y'} in context`
                 : '';
         }
     }
@@ -2086,6 +2099,79 @@
         SillyTavern.getContext().saveSettingsDebounced();
     }
 
+    // ─── Session Override System ─────────────────────────────────────────────────
+
+    const SESSION_OVERRIDE_KEYS = [
+        'contextDepth','localHistoryLimit','maxTokens',
+        'connectionSource','connectionProfileId','systemPrompt',
+        'includeSystemPrompt','includeAuthorsNote',
+        'includeCharacterCard','includeUserPersonality','reasoningTrimStrings',
+    ];
+
+    function getSessionOverrides() {
+        try { return getCurrentSession()?.overrides || {}; } catch(_) { return {}; }
+    }
+
+    function getEffectiveSettings() {
+        return { ...getSettings(), ...getSessionOverrides() };
+    }
+
+    function setSessionOverride(key, value) {
+        try {
+            const sess = getCurrentSession();
+            if (!sess) return;
+            if (!sess.overrides) sess.overrides = {};
+            if (value === undefined || value === null) delete sess.overrides[key];
+            else sess.overrides[key] = value;
+            saveSettings();
+            updateSessionOverrideIndicator();
+        } catch(_) {}
+    }
+
+    function clearAllSessionOverrides() {
+        try {
+            const sess = getCurrentSession();
+            if (!sess) return;
+            sess.overrides = {};
+            saveSettings();
+            updateSessionOverrideIndicator();
+        } catch(_) {}
+    }
+
+    function hasSessionOverrides() {
+        try { const o = getCurrentSession()?.overrides; return !!(o && Object.keys(o).length > 0); }
+        catch(_) { return false; }
+    }
+
+    function updateSessionOverrideIndicator() {
+        const has = hasSessionOverrides();
+        const dot = document.getElementById('scp-sp-override-dot');
+        if (dot) dot.style.display = has ? '' : 'none';
+        const gearDot = document.getElementById('scp-gear-ov-dot');
+        if (gearDot) gearDot.style.display = has ? '' : 'none';
+        const btn = document.getElementById('scp-ext-settings-btn');
+        if (btn) btn.classList.toggle('scp-has-overrides', has);
+        updateSPOverrideIndicators();
+        const info = document.getElementById('scp-sp-footer-info');
+        if (info) {
+            const ov = getSessionOverrides();
+            const count = Object.keys(ov).length;
+            info.textContent = count ? `${count} session override${count !== 1 ? 's' : ''} active` : '';
+        }
+    }
+
+    function updateSPOverrideIndicators() {
+        const ov = getSessionOverrides();
+        document.querySelectorAll('.scp-sp-ov-label[data-ovkey]').forEach(label => {
+            label.classList.toggle('has-override', label.dataset.ovkey in ov);
+        });
+        document.querySelectorAll('.scp-sp-ov-clear[data-ovkey]').forEach(btn => {
+            const active = btn.dataset.ovkey in ov;
+            btn.classList.toggle('active', active);
+            btn.disabled = !active;
+        });
+    }
+
     // ─── Custom Dialog (replaces browser prompt/confirm/alert) ──────────────────
 
     function escHtml(str) {
@@ -2385,7 +2471,69 @@
 
     function getAuthorsNote() {
         const ctx = SillyTavern.getContext();
-        return ctx.chatMetadata?.note_prompt || ctx.authorsNote || ctx.authors_note || '';
+        return ctx.chatMetadata
+        ?.note_prompt || ctx.authorsNote || ctx.authors_note || '';
+    }
+
+    let _lastChatLen = -1; 
+
+    function updateDepthSlidersMax() {
+        const ctx = SillyTavern.getContext();
+        const chat = ctx.chat || window.chat ||[];
+        const maxVal = Math.max(1, chat.length);
+        
+        if (_lastChatLen === -1) {
+            _lastChatLen = maxVal;
+        }
+
+        const s = getSettings();
+        const sess = getCurrentSession();
+        let settingsChanged = false;
+
+        const globalDepth = parseInt(s.contextDepth) || 0;
+        if (globalDepth >= _lastChatLen && maxVal > _lastChatLen) {
+            s.contextDepth = maxVal;
+            settingsChanged = true;
+        }
+
+        if (sess && sess.overrides && sess.overrides.contextDepth !== undefined) {
+            const ovDepth = parseInt(sess.overrides.contextDepth) || 0;
+            if (ovDepth >= _lastChatLen && maxVal > _lastChatLen) {
+                sess.overrides.contextDepth = maxVal;
+                settingsChanged = true;
+            }
+        }
+
+        if (settingsChanged) {
+            saveSettings();
+        }
+
+        _lastChatLen = maxVal;
+        
+        const eff = getEffectiveSettings();
+
+        const sliders =[
+            { id: 'scp-depth-slider', valId: 'scp-depth-val', setting: s.contextDepth },
+            { id: 'scp-sp-depth-slider', valId: 'scp-sp-depth-val', setting: s.contextDepth },
+            { id: 'scp-sp-ov-depth-slider', valId: 'scp-sp-ov-depth-val', setting: eff.contextDepth }
+        ];
+
+        sliders.forEach(item => {
+            const el = document.getElementById(item.id);
+            if (el) {
+                if (parseInt(el.max) !== maxVal) {
+                    el.max = maxVal;
+                }
+                
+                const renderVal = Math.min(maxVal, parseInt(item.setting ?? 15));
+                el.value = renderVal;
+                
+                const valEl = document.getElementById(item.valId);
+                if (valEl) {
+                    valEl.textContent = renderVal;
+                }
+            }
+        });
     }
 
     // ─── Macro Expansion ────────────────────────────────────────────────────────
@@ -2629,6 +2777,236 @@
         gear: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
     };
 
+    // ─── Settings Overlay ────────────────────────────────────────────────────────
+
+    function buildSettingsOverlayHTML() {
+        return `
+<div id="scp-settings-overlay" class="scp-settings-overlay" style="display:none">
+  <div class="scp-settings-panel">
+
+    <div class="scp-sp-header">
+      <div class="scp-sp-header-left">
+        <span style="color:var(--scp-accent);display:flex">${I.gear}</span>
+        <span class="scp-sp-title">ST-Copilot Settings</span>
+      </div>
+      <div class="scp-sp-tabs">
+        <button class="scp-sp-tab active" data-sptab="global">Global</button>
+        <button class="scp-sp-tab" data-sptab="session">
+          Session
+          <span class="scp-sp-override-dot" id="scp-sp-override-dot" style="display:none" title="Session overrides active"></span>
+        </button>
+      </div>
+      <button class="scp-hbtn scp-hbtn-close" id="scp-sp-close">${I.x}</button>
+    </div>
+
+    <div class="scp-sp-body">
+
+      <!-- ══ GLOBAL TAB ══ -->
+      <div class="scp-sp-tab-pane" id="scp-sp-pane-global">
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-sliders"></i> General</div>
+          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-enabled"><span>Enable ST-Copilot</span></label>
+          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-icon-persistent"><span>Always show floating icon</span></label>
+          <div class="scp-sp-row" style="gap:8px;margin-top:6px">
+            <label class="scp-sp-check" style="flex:0 0 auto"><input type="checkbox" id="scp-sp-hotkey-enabled"><span>Shortcut</span></label>
+            <input type="text" class="scp-sp-input" id="scp-sp-hotkey" placeholder="Alt+Shift+C" style="flex:1">
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-bookmark"></i> Configuration Profiles</div>
+          <div class="scp-profile-bar">
+            <select id="scp-sp-profile-select"></select>
+            <button class="scp-profile-icon-btn" id="scp-sp-profile-save" title="Save to profile"><i class="fa-solid fa-floppy-disk"></i></button>
+            <button class="scp-profile-icon-btn" id="scp-sp-profile-create" title="New profile"><i class="fa-solid fa-plus"></i></button>
+            <button class="scp-profile-icon-btn" id="scp-sp-profile-rename" title="Rename"><i class="fa-solid fa-pen"></i></button>
+            <button class="scp-profile-icon-btn danger" id="scp-sp-profile-delete" title="Delete"><i class="fa-solid fa-trash"></i></button>
+          </div>
+          <div class="scp-binding-row" id="scp-sp-binding-section" style="display:none">
+            <span class="scp-binding-label">Auto-load for:</span>
+            <button class="scp-bind-btn" id="scp-sp-bind-char"><i class="fa-solid fa-user"></i> Character</button>
+            <button class="scp-bind-btn" id="scp-sp-bind-chat"><i class="fa-solid fa-comments"></i> Chat</button>
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-plug"></i> Connection</div>
+          <select class="scp-sp-select" id="scp-sp-conn-source">
+            <option value="default">Use Current API</option>
+            <option value="profile">Use Specific Profile</option>
+          </select>
+          <div class="scp-sp-field" id="scp-sp-global-profile-group" style="display:none; margin-top:6px">
+            <label class="scp-sp-label">Connection Profile</label>
+            <select class="scp-sp-select" id="scp-sp-conn-profile">
+              <option value="">-- Select Profile --</option>
+            </select>
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-label">Max Response Tokens</label>
+            <input type="number" class="scp-sp-input" id="scp-sp-max-tokens" placeholder="2048" min="64" max="32768">
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-box-archive"></i> Context Payload</div>
+          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-include-sysprompt"><span>Include ST System Prompt</span></label>
+          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-include-anote"><span>Include Author's Note</span></label>
+          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-include-charcard"><span>Include Character Card</span></label>
+          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-include-persona"><span>Include User Persona</span></label>
+          <div class="scp-sp-field" style="margin-top:8px">
+            <label class="scp-sp-label">Main Chat Depth</label>
+            <div class="scp-sp-row">
+              <input type="range" class="scp-slider" id="scp-sp-depth-slider" min="0" max="100" style="flex:1">
+              <span class="scp-depth-val" id="scp-sp-depth-val" style="cursor:default">15</span>
+            </div>
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-label">Session History Limit</label>
+            <input type="number" class="scp-sp-input" id="scp-sp-history-limit" placeholder="50" min="1" max="500">
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-label">Reasoning Trim Strings <span class="scp-sp-hint">(one per line)</span></label>
+            <textarea class="scp-sp-textarea" id="scp-sp-reasoning-trim" rows="2" placeholder="&lt;think&gt;&lt;/think&gt;"></textarea>
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-message"></i> System Prompt</div>
+          <textarea class="scp-sp-textarea scp-sp-textarea-lg" id="scp-sp-sysprompt" rows="7"></textarea>
+          <button class="scp-action-btn" id="scp-sp-reset-prompt" style="margin-top:6px">${I.refresh}<span>Reset to Default</span></button>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-book"></i> Lorebook AI Edits</div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-label">AI Edit Prompt <span class="scp-sp-hint">macros: {{lorebook_output}}, {{active_lorebooks}}</span></label>
+            <textarea class="scp-sp-textarea" id="scp-sp-lb-manage-prompt" rows="4" style="font-family:monospace;font-size:11px"></textarea>
+            <button class="scp-action-btn" id="scp-sp-reset-lb-prompt" style="margin-top:4px">${I.refresh}<span>Reset</span></button>
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-label">Main chat scan depth</label>
+            <input type="number" class="scp-sp-input" id="scp-sp-lb-st-scan-depth" placeholder="5" min="0" max="200">
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-label">Copilot scan depth</label>
+            <input type="number" class="scp-sp-input" id="scp-sp-lb-copilot-scan-depth" placeholder="6" min="0" max="200">
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-palette"></i> Interface Theme</div>
+          <div id="scp-sp-theme-section"></div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title" style="color:var(--scp-danger)"><i class="fa-solid fa-triangle-exclamation"></i> Danger Zone</div>
+          <button class="scp-action-btn scp-sp-danger-btn" id="scp-sp-clear-sessions">${I.trash}<span>Clear All Sessions</span></button>
+        </div>
+
+      </div>
+
+      <!-- ══ SESSION TAB ══ -->
+      <div class="scp-sp-tab-pane" id="scp-sp-pane-session" style="display:none">
+
+        <div class="scp-sp-session-banner">
+          <span>${I.edit}</span>
+          <span>Overrides global settings for the current session only.</span>
+          <button class="scp-sp-reset-all-btn" id="scp-sp-reset-all-overrides">Reset All</button>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-plug"></i> Connection</div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="connectionSource">Connection Source</label>
+            <div class="scp-sp-ov-wrap">
+              <select class="scp-sp-select" id="scp-sp-ov-conn-source">
+                <option value="default">Use Current API</option>
+                <option value="profile">Use Specific Profile</option>
+              </select>
+              <button class="scp-sp-ov-clear" data-ovkey="connectionSource" title="Clear override" disabled>↺</button>
+            </div>
+          </div>
+          <div class="scp-sp-field" id="scp-sp-ov-profile-group" style="display:none">
+            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="connectionProfileId">Profile</label>
+            <div class="scp-sp-ov-wrap">
+              <select class="scp-sp-select" id="scp-sp-ov-conn-profile">
+                <option value="">-- Select Profile --</option>
+              </select>
+              <button class="scp-sp-ov-clear" data-ovkey="connectionProfileId" title="Clear override" disabled>↺</button>
+            </div>
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="maxTokens">Max Tokens</label>
+            <div class="scp-sp-ov-wrap">
+              <input type="number" class="scp-sp-input" id="scp-sp-ov-max-tokens" placeholder="Use global" min="64" max="32768">
+              <button class="scp-sp-ov-clear" data-ovkey="maxTokens" title="Clear override" disabled>↺</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-box-archive"></i> Context Payload</div>
+          <div class="scp-sp-ov-check-row">
+            <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-include-sysprompt"><span>Include ST System Prompt</span></label>
+            <button class="scp-sp-ov-clear" data-ovkey="includeSystemPrompt" title="Clear override" disabled>↺</button>
+          </div>
+          <div class="scp-sp-ov-check-row">
+            <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-include-anote"><span>Include Author's Note</span></label>
+            <button class="scp-sp-ov-clear" data-ovkey="includeAuthorsNote" title="Clear override" disabled>↺</button>
+          </div>
+          <div class="scp-sp-ov-check-row">
+            <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-include-charcard"><span>Include Character Card</span></label>
+            <button class="scp-sp-ov-clear" data-ovkey="includeCharacterCard" title="Clear override" disabled>↺</button>
+          </div>
+          <div class="scp-sp-ov-check-row">
+            <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-include-persona"><span>Include User Persona</span></label>
+            <button class="scp-sp-ov-clear" data-ovkey="includeUserPersonality" title="Clear override" disabled>↺</button>
+          </div>
+          <div class="scp-sp-field" style="margin-top:8px">
+            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="contextDepth">Main Chat Depth</label>
+            <div class="scp-sp-ov-wrap">
+              <input type="range" class="scp-slider" id="scp-sp-ov-depth-slider" min="0" max="100" style="flex:1">
+              <span class="scp-depth-val" id="scp-sp-ov-depth-val" style="cursor:default">15</span>
+              <button class="scp-sp-ov-clear" data-ovkey="contextDepth" title="Clear override" disabled>↺</button>
+            </div>
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="localHistoryLimit">History Limit</label>
+            <div class="scp-sp-ov-wrap">
+              <input type="number" class="scp-sp-input" id="scp-sp-ov-history-limit" placeholder="Use global" min="1" max="500">
+              <button class="scp-sp-ov-clear" data-ovkey="localHistoryLimit" title="Clear override" disabled>↺</button>
+            </div>
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="reasoningTrimStrings">Reasoning Trim</label>
+            <div class="scp-sp-ov-wrap scp-sp-ov-wrap-col">
+              <textarea class="scp-sp-textarea" id="scp-sp-ov-reasoning-trim" rows="2" placeholder="Use global"></textarea>
+              <button class="scp-sp-ov-clear" data-ovkey="reasoningTrimStrings" title="Clear override" disabled>↺</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-message"></i> System Prompt</div>
+          <div class="scp-sp-ov-label-row">
+            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="systemPrompt">Prompt</label>
+            <button class="scp-sp-ov-clear" data-ovkey="systemPrompt" title="Clear override" disabled>↺</button>
+          </div>
+          <textarea class="scp-sp-textarea scp-sp-textarea-lg" id="scp-sp-ov-sysprompt" placeholder="Using global system prompt…"></textarea>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="scp-sp-footer">
+      <span class="scp-sp-footer-info" id="scp-sp-footer-info"></span>
+    </div>
+
+  </div>
+</div>`;
+    }
+
     // ─── UI Construction ────────────────────────────────────────────────────────
 
     function buildWindowHTML() {
@@ -2653,7 +3031,7 @@
                     <span id="scp-opacity-val">95%</span>
                 </div>
             </div>
-            <button class="scp-hbtn" id="scp-ext-settings-btn" title="Extension Settings">${I.gear}</button>
+            <button class="scp-hbtn scp-hbtn-gear" id="scp-ext-settings-btn" title="Settings">${I.gear}<span class="scp-gear-ov-dot" id="scp-gear-ov-dot" style="display:none"></span></button>
             <button class="scp-hbtn" id="scp-min-btn" title="Minimize to icon">${I.minus}</button>
             <button class="scp-hbtn scp-hbtn-close" id="scp-close-btn" title="Hide">${I.x}</button>
         </div>
@@ -2684,6 +3062,17 @@
         <span class="scp-depth-val scp-depth-clickable" id="scp-depth-val" title="Click to enter exact value">15</span>
         <div class="scp-toolbar-sep"></div>
         <button class="scp-tbtn" id="scp-lb-btn" title="Lorebook Manager">${I.book}</button>
+        <button class="scp-tbtn" id="scp-search-btn" title="Search in chat (Ctrl+F)">${I.search}</button>
+    </div>
+
+    <div class="scp-search-bar" id="scp-search-bar">
+        <span class="scp-search-bar-icon">${I.search}</span>
+        <input type="text" id="scp-search-input" class="scp-search-input" placeholder="Search messages…" autocomplete="off" spellcheck="false">
+        <button class="scp-search-nav scp-search-word-btn" id="scp-search-word" title="Whole word">W</button>
+        <span class="scp-search-count" id="scp-search-count"></span>
+        <button class="scp-search-nav" id="scp-search-prev" title="Previous (Shift+Enter)">↑</button>
+        <button class="scp-search-nav" id="scp-search-next" title="Next (Enter)">↓</button>
+        <button class="scp-search-close-btn" id="scp-search-close" title="Close">✕</button>
     </div>
 
     <div class="scp-messages" id="scp-messages"></div>
@@ -2748,6 +3137,11 @@
         const lbRoot = document.createElement('div');
         lbRoot.innerHTML = buildLorebookManagerHTML();
         document.body.appendChild(lbRoot);
+
+        // Settings overlay — also direct to body
+        const spRoot = document.createElement('div');
+        spRoot.innerHTML = buildSettingsOverlayHTML();
+        document.body.appendChild(spRoot);
 
         windowEl = document.getElementById(WIN_ID);
         iconEl = document.getElementById(ICON_ID);
@@ -2925,6 +3319,10 @@
     function scrollToBottom() { const c = $('scp-messages'); if (c) c.scrollTop = c.scrollHeight; }
 
     function renderSession(session) {
+        clearSearchHighlights();
+        _searchMatches = [];
+        _searchIdx = -1;
+        updateSearchCount();
         const c = $('scp-messages');
         if (!c) return;
         c.innerHTML = '';
@@ -2990,6 +3388,14 @@
                     contentEl.innerHTML = renderMarkdown(content);
                 }
                 renderProposalCard(changes, el);
+            }
+        }
+
+        if (_searchOpen && _searchQuery.trim()) {
+            const newMarks = _applyHighlightsInRoot(el);
+            if (newMarks.length) {
+                _searchMatches.push(...newMarks);
+                updateSearchCount();
             }
         }
     }
@@ -3242,14 +3648,169 @@
         if (!session.messages.length) renderSession(session);
     }
 
+    // ─── Chat Search ─────────────────────────────────────────────────────────────
+
+    let _searchQuery = '';
+    let _searchMatches = [];
+    let _searchIdx = -1;
+    let _searchDebounceId = null;
+    let _searchOpen = false;
+    let _searchWholeWord = false;
+
+    function openSearch() {
+        _searchOpen = true;
+        const bar = document.getElementById('scp-search-bar');
+        if (bar) {
+            bar.classList.add('scp-search-open');
+            requestAnimationFrame(() => {
+                const inp = document.getElementById('scp-search-input');
+                if (inp) { inp.focus(); inp.select(); }
+            });
+        }
+        document.getElementById('scp-search-btn')?.classList.add('active');
+    }
+
+    function closeSearch() {
+        _searchOpen = false;
+        _searchWholeWord = false;
+        document.getElementById('scp-search-bar')?.classList.remove('scp-search-open');
+        document.getElementById('scp-search-btn')?.classList.remove('active');
+        document.getElementById('scp-search-word')?.classList.remove('active');
+        clearSearchHighlights();
+        _searchMatches = [];
+        _searchIdx = -1;
+        const inp = document.getElementById('scp-search-input');
+        if (inp) inp.value = '';
+        _searchQuery = '';
+        updateSearchCount();
+    }
+
+    function clearSearchHighlights() {
+        const marks = document.querySelectorAll('#scp-messages mark.scp-search-hl');
+        if (!marks.length) return;
+        const parents = new Set();
+        marks.forEach(m => {
+            const p = m.parentNode;
+            if (!p) return;
+            p.replaceChild(document.createTextNode(m.textContent), m);
+            parents.add(p);
+        });
+        parents.forEach(p => p.normalize());
+    }
+
+    function updateSearchCount() {
+        const el = document.getElementById('scp-search-count');
+        if (!el) return;
+        el.textContent = (_searchMatches.length && _searchQuery)
+            ? `${_searchIdx + 1}/${_searchMatches.length}`
+            : '';
+    }
+
+    function _applyHighlightsInRoot(root) {
+        const lq = _searchQuery.toLowerCase();
+        let regex = null;
+        if (_searchWholeWord) {
+            try { regex = new RegExp(`\\b${lq.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'); } catch(_) {}
+        }
+
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+            acceptNode(node) {
+                const p = node.parentElement;
+                if (!p) return NodeFilter.FILTER_REJECT;
+                if (p.closest('.scp-msg-actions,.scp-msg-meta,.scp-msg-avatar,.scp-reasoning-summary,.scp-search-hl'))
+                    return NodeFilter.FILTER_REJECT;
+                if (!p.closest('.scp-msg-body')) return NodeFilter.FILTER_REJECT;
+                if (regex) {
+                    regex.lastIndex = 0;
+                    const hit = regex.test(node.nodeValue);
+                    regex.lastIndex = 0;
+                    return hit ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+                }
+                return node.nodeValue.toLowerCase().includes(lq)
+                    ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+            }
+        });
+        const textNodes = [];
+        let n;
+        while ((n = walker.nextNode())) textNodes.push(n);
+
+        const newMarks = [];
+        for (const node of textNodes) {
+            const text = node.nodeValue;
+            const frag = document.createDocumentFragment();
+            let lastIndex = 0;
+
+            if (regex) {
+                regex.lastIndex = 0;
+                let match;
+                while ((match = regex.exec(text)) !== null) {
+                    if (match.index > lastIndex) frag.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+                    const mark = document.createElement('mark');
+                    mark.className = 'scp-search-hl';
+                    mark.textContent = match[0];
+                    frag.appendChild(mark);
+                    newMarks.push(mark);
+                    lastIndex = match.index + match[0].length;
+                }
+            } else {
+                const lower = text.toLowerCase();
+                let idx = lower.indexOf(lq, 0);
+                if (idx === -1) continue;
+                while (idx !== -1) {
+                    if (idx > lastIndex) frag.appendChild(document.createTextNode(text.slice(lastIndex, idx)));
+                    const mark = document.createElement('mark');
+                    mark.className = 'scp-search-hl';
+                    mark.textContent = text.slice(idx, idx + _searchQuery.length);
+                    frag.appendChild(mark);
+                    newMarks.push(mark);
+                    lastIndex = idx + _searchQuery.length;
+                    idx = lower.indexOf(lq, lastIndex);
+                }
+            }
+
+            if (lastIndex === 0) continue;
+            if (lastIndex < text.length) frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+            node.parentNode.replaceChild(frag, node);
+        }
+        return newMarks;
+    }
+
+    function performSearch() {
+        clearSearchHighlights();
+        _searchMatches = [];
+        _searchIdx = -1;
+        const q = _searchQuery.trim();
+        if (!q) { updateSearchCount(); return; }
+        const container = document.getElementById('scp-messages');
+        if (!container) return;
+        _searchMatches = _applyHighlightsInRoot(container);
+        if (_searchMatches.length) {
+            _searchIdx = 0;
+            _searchMatches[0].classList.add('scp-search-current');
+            _searchMatches[0].scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+        updateSearchCount();
+    }
+
+    function navigateSearch(dir) {
+        if (!_searchMatches.length) return;
+        _searchMatches[_searchIdx]?.classList.remove('scp-search-current');
+        _searchIdx = (_searchIdx + dir + _searchMatches.length) % _searchMatches.length;
+        const cur = _searchMatches[_searchIdx];
+        cur.classList.add('scp-search-current');
+        cur.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        updateSearchCount();
+    }
+
     // ─── Generation Flow ────────────────────────────────────────────────────────
+
 
     let _generating = false;
 
     async function runGenerate(session, userText, addUserMsg = true) {
         if (_generating) return;
         _generating = true;
-        const settings = getSettings();
+        const settings = getEffectiveSettings();
         setGeneratingState(true);
         let userMsg = null;
         try {
@@ -3303,7 +3864,7 @@
     // ─── Context Inspector ──────────────────────────────────────────────────────
 
     async function openInspector() {
-        const sess = getCurrentSession(); const settings = getSettings();
+        const sess = getCurrentSession(); const settings = getEffectiveSettings();
         const messages = await assembleMessages(sess, settings, null);
         const fmtEl = $('scp-ctx-formatted'); const jsonEl = $('scp-ctx-json');
         if (fmtEl) fmtEl.textContent = formatPayloadAsText(messages);
@@ -3427,6 +3988,7 @@
             const r = iconTarget.getBoundingClientRect();
             ox = e.clientX; oy = e.clientY; sl = r.left; st = r.top;
             iconTarget.setPointerCapture(e.pointerId);
+            iconTarget.classList.add('scp-icon-dragging');
             e.preventDefault();
         });
 
@@ -3444,6 +4006,7 @@
         iconTarget.addEventListener('pointerup', () => {
             if (!active) return;
             active = false;
+            iconTarget.classList.remove('scp-icon-dragging');
             if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; flush(); }
             if (moved) {
                 const s = getSettings();
@@ -3457,6 +4020,7 @@
 
         iconTarget.addEventListener('pointercancel', () => {
             active = false; moved = false;
+            iconTarget.classList.remove('scp-icon-dragging');
             if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
         });
 
@@ -3467,7 +4031,7 @@
 
     function applyCustomTheme(theme) {
         if (!theme) return;
-        const targets = [windowEl, document.getElementById('scp-lb-overlay'), document.getElementById('scp-diff-modal')].filter(Boolean);
+        const targets = [windowEl, document.getElementById('scp-lb-overlay'), document.getElementById('scp-diff-modal'), document.getElementById('scp-settings-overlay')].filter(Boolean);
         for (const [key, cssVar] of Object.entries(THEME_CSS_MAP)) {
             if (theme[key] !== undefined && theme[key] !== '') {
                 targets.forEach(t => t.style.setProperty(cssVar, theme[key]));
@@ -3612,13 +4176,17 @@
             const commit = () => {
                 const val = Math.max(0, parseInt(input.value) || 0);
                 getSettings().contextDepth = val; saveSettings();
+                
+                updateDepthSlidersMax();
+                syncOverlayUI('contextDepth', val);
+                
                 const span = document.createElement('span');
                 span.className = 'scp-depth-val scp-depth-clickable'; span.id = 'scp-depth-val';
                 span.title = 'Click to enter exact value'; span.textContent = val;
                 input.replaceWith(span);
                 setupDepthClickEdit();
                 const slider = $('scp-depth-slider');
-                if (slider) { slider.value = Math.min(100, val); }
+                if (slider) { slider.value = val; }
                 updateMsgCount(getCurrentSession());
             };
             input.addEventListener('blur', commit);
@@ -3756,8 +4324,8 @@
         return true;
     }
 
-    function buildThemeEditor() {
-        const container = $('scp-theme-section'); if (!container) return;
+    function buildThemeEditor(containerOverride) {
+        const container = containerOverride || $('scp-theme-section'); if (!container) return;
         container.innerHTML = '';
         const s = getSettings();
 
@@ -3777,6 +4345,8 @@
             <button class="scp-profile-icon-btn" id="scp-theme-create" title="Create new theme from preset"><i class="fa-solid fa-plus"></i></button>
             <button class="scp-profile-icon-btn" id="scp-theme-rename" title="Rename selected theme"><i class="fa-solid fa-pen"></i></button>
             <button class="scp-profile-icon-btn danger" id="scp-theme-delete" title="Delete selected theme"><i class="fa-solid fa-trash"></i></button>
+            <button class="scp-profile-icon-btn" id="scp-theme-export" title="Export theme to JSON file"><i class="fa-solid fa-file-export"></i></button>
+            <button class="scp-profile-icon-btn" id="scp-theme-import" title="Import theme from JSON file"><i class="fa-solid fa-file-import"></i></button>
         `;
         container.appendChild(profileRow);
 
@@ -3850,6 +4420,45 @@
             s.customTheme = { ...s.savedThemes[s.activeThemeProfile] };
             saveSettings(); applyCustomTheme(s.customTheme); buildThemeEditor();
             toastr.success('Deleted.', EXT_DISPLAY);
+        });
+
+        profileRow.querySelector('#scp-theme-export').addEventListener('click', () => {
+            const s2 = getSettings();
+            const name = sel.value || 'custom';
+            const payload = JSON.stringify({ name, version: 1, theme: s2.customTheme }, null, 2);
+            const blob = new Blob([payload], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `st-copilot-theme-${name.replace(/[^a-z0-9]/gi, '_')}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        profileRow.querySelector('#scp-theme-import').addEventListener('click', () => {
+            const inp = document.createElement('input');
+            inp.type = 'file'; inp.accept = '.json';
+            inp.onchange = async () => {
+                const file = inp.files?.[0]; if (!file) return;
+                try {
+                    const text = await file.text();
+                    const data = JSON.parse(text);
+                    const imported = data.theme || data;
+                    if (typeof imported !== 'object' || Array.isArray(imported)) throw new Error('Invalid format');
+                    const themeName = (data.name && typeof data.name === 'string')
+                        ? data.name
+                        : file.name.replace(/\.json$/i, '');
+                    const s2 = getSettings();
+                    s2.savedThemes[themeName] = { ...THEME_PRESETS.default, ...imported };
+                    s2.activeThemeProfile = themeName;
+                    s2.customTheme = { ...s2.savedThemes[themeName] };
+                    saveSettings(); applyCustomTheme(s2.customTheme); buildThemeEditor(containerOverride);
+                    toastr.success(`Theme "${escHtml(themeName)}" imported.`, EXT_DISPLAY);
+                } catch (e) {
+                    toastr.error('Invalid theme file.', EXT_DISPLAY);
+                }
+            };
+            inp.click();
         });
 
         // Preset pills
@@ -3938,9 +4547,6 @@
 
     async function updateProfilesList() {
         const profSel = $('scp-conn-profile'); if (!profSel) return;
-        const s = getSettings(); const currentVal = s.connectionProfileId || '';
-        profSel.innerHTML = '<option value="">-- Select Profile --</option>';
-        
         const ctx = SillyTavern.getContext();
         let profiles =[];
         try {
@@ -3951,6 +4557,10 @@
         } catch (e) {
             console.warn(`[${EXT_DISPLAY}] Failed to fetch profiles via slash command`, e);
         }
+
+        const s = getSettings(); 
+        const currentVal = s.connectionProfileId || '';
+        profSel.innerHTML = '<option value="">-- Select Profile --</option>';
 
         if (profiles && profiles.length > 0) {
             profiles.forEach(p => {
@@ -3981,6 +4591,65 @@
     function autoResize(el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 180)}px`; }
 
     // ─── Settings Panel Handlers ─────────────────────────────────────────────────
+
+    function syncOverlayUI(key, val) {
+        const gIdMap = {
+            connectionSource: 'scp-sp-conn-source',
+            connectionProfileId: 'scp-sp-conn-profile',
+            includeSystemPrompt: 'scp-sp-include-sysprompt',
+            includeAuthorsNote: 'scp-sp-include-anote',
+            includeCharacterCard: 'scp-sp-include-charcard',
+            includeUserPersonality: 'scp-sp-include-persona',
+            contextDepth: 'scp-sp-depth-slider'
+        };
+        const gId = gIdMap[key];
+        if (gId) {
+            const gEl = document.getElementById(gId);
+            if (gEl) {
+                if (gEl.type === 'checkbox') gEl.checked = !!val;
+                else gEl.value = val ?? '';
+            }
+            if (key === 'connectionSource') {
+                const gPg = document.getElementById('scp-sp-global-profile-group');
+                if (gPg) gPg.style.display = val === 'profile' ? '' : 'none';
+            }
+            if (key === 'contextDepth') {
+                const gDv = document.getElementById('scp-sp-depth-val');
+                if (gDv) gDv.textContent = val ?? 15;
+            }
+        }
+
+        const ov = getSessionOverrides();
+        if (key in ov) return;
+
+        const eff = getEffectiveSettings();
+        const ovIdMap = {
+            connectionSource: 'scp-sp-ov-conn-source',
+            connectionProfileId: 'scp-sp-ov-conn-profile',
+            includeSystemPrompt: 'scp-sp-ov-include-sysprompt',
+            includeAuthorsNote: 'scp-sp-ov-include-anote',
+            includeCharacterCard: 'scp-sp-ov-include-charcard',
+            includeUserPersonality: 'scp-sp-ov-include-persona',
+            contextDepth: 'scp-sp-ov-depth-slider'
+        };
+
+        const ovId = ovIdMap[key];
+        if (ovId) {
+            const ovEl = document.getElementById(ovId);
+            if (ovEl) {
+                if (ovEl.type === 'checkbox') ovEl.checked = !!eff[key];
+                else ovEl.value = eff[key] ?? '';
+            }
+            if (key === 'connectionSource') {
+                const pg = document.getElementById('scp-sp-ov-profile-group');
+                if (pg) pg.style.display = eff.connectionSource === 'profile' ? '' : 'none';
+            }
+            if (key === 'contextDepth') {
+                const dv = document.getElementById('scp-sp-ov-depth-val');
+                if (dv) dv.textContent = eff.contextDepth ?? 15;
+            }
+        }
+    }
     
     function updateSettingsUI() {
         const s = getSettings();
@@ -4035,17 +4704,30 @@
         const bindCheck = (id, key, cb) => {
             const el = $(id); if (!el) return;
             el.checked = !!s[key];
-            el.addEventListener('change', () => { getSettings()[key] = el.checked; saveSettings(); if (cb) cb(); });
+            el.addEventListener('change', () => { 
+                getSettings()[key] = el.checked; saveSettings(); 
+                syncOverlayUI(key, el.checked);
+                if (cb) cb(); 
+            });
         };
         const bindInput = (id, key, toVal, cb) => {
             const el = $(id); if (!el) return;
             el.value = s[key] ?? '';
-            el.addEventListener('input', () => { getSettings()[key] = toVal ? toVal(el.value) : el.value; saveSettings(); if (cb) cb(); });
+            el.addEventListener('input', () => { 
+                const v = toVal ? toVal(el.value) : el.value;
+                getSettings()[key] = v; saveSettings(); 
+                syncOverlayUI(key, v);
+                if (cb) cb(); 
+            });
         };
         const bindSelect = (id, key, cb) => {
             const el = $(id); if (!el) return;
             el.value = s[key] ?? '';
-            el.addEventListener('change', () => { getSettings()[key] = el.value; saveSettings(); if (cb) cb(el.value); });
+            el.addEventListener('change', () => { 
+                getSettings()[key] = el.value; saveSettings(); 
+                syncOverlayUI(key, el.value);
+                if (cb) cb(el.value); 
+            });
         };
 
         bindCheck('scp-enabled', 'enabled', () => {
@@ -4062,8 +4744,12 @@
         bindCheck('scp-include-persona', 'includeUserPersonality', updCtx);
         bindCheck('scp-icon-persistent', 'floatingIconPersistent', () => {
             const ss = getSettings();
-            if (ss.floatingIconPersistent) iconEl.style.display = 'flex';
-            else if (!ss.windowVisible && !ss.minimized) iconEl.style.display = 'none';
+            const isTouchDevice = 'ontouchstart' in window;
+            if (ss.floatingIconPersistent || ss.minimized || (!ss.windowVisible && isTouchDevice)) {
+                if (iconEl) iconEl.style.display = 'flex';
+            } else {
+                if (iconEl) iconEl.style.display = 'none';
+            }
         });
 
         const reasoningTrimEl = $('scp-reasoning-trim');
@@ -4104,7 +4790,11 @@
         if (profSel) {
             profSel.addEventListener('mouseenter', updateProfilesList);
             profSel.addEventListener('focus', updateProfilesList);
-            profSel.addEventListener('change', () => { getSettings().connectionProfileId = profSel.value; saveSettings(); });
+            profSel.addEventListener('change', () => { 
+                getSettings().connectionProfileId = profSel.value; 
+                saveSettings(); 
+                syncOverlayUI('connectionProfileId', profSel.value);
+            });
         }
 
         // Config profiles
@@ -4238,40 +4928,479 @@
         });
     }
 
-    function openExtensionSettings() {
-        const drawerButton = document.getElementById('extensions-settings-button');
-        const extensionsBlock = document.getElementById('rm_extensions_block');
+    function openSettingsPanel() {
+        const overlay = document.getElementById('scp-settings-overlay');
+        if (!overlay) return;
+        applyCustomTheme(getSettings().customTheme || THEME_PRESETS.default);
+        syncSPFromSettings();
+        buildThemeEditor(document.getElementById('scp-sp-theme-section'));
+        overlay.style.display = 'flex';
+        updateSessionOverrideIndicator();
+    }
 
-        const isDrawerOpen = extensionsBlock && !extensionsBlock.classList.contains('hidden') && 
-                             getComputedStyle(extensionsBlock).display !== 'none';
+    function closeSettingsPanel() {
+        const overlay = document.getElementById('scp-settings-overlay');
+        if (overlay) overlay.style.display = 'none';
+    }
 
-        if (!isDrawerOpen && drawerButton) {
-            const toggle = drawerButton.querySelector('.drawer-toggle') || drawerButton;
-            toggle.click();
+    function syncSPFromSettings() {
+        const s = getSettings();
+        const ov = getSessionOverrides();
+        const eff = getEffectiveSettings();
+
+        updateDepthSlidersMax();
+
+        const g = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
+        const gC = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+
+        // Global tab
+        gC('scp-sp-enabled', s.enabled);
+        gC('scp-sp-hotkey-enabled', s.hotkeyEnabled);
+        g('scp-sp-hotkey', s.hotkey);
+        gC('scp-sp-icon-persistent', s.floatingIconPersistent);
+        g('scp-sp-conn-source', s.connectionSource ?? 'default');
+        const gCp = document.getElementById('scp-sp-global-profile-group');
+        if (gCp) gCp.style.display = s.connectionSource === 'profile' ? '' : 'none';
+        g('scp-sp-max-tokens', s.maxTokens);
+        g('scp-sp-history-limit', s.localHistoryLimit);
+        const spDs = document.getElementById('scp-sp-depth-slider');
+        const spDv = document.getElementById('scp-sp-depth-val');
+        if (spDs) spDs.value = s.contextDepth ?? 15;
+        if (spDv) spDv.textContent = s.contextDepth ?? 15;
+        gC('scp-sp-include-sysprompt', s.includeSystemPrompt);
+        gC('scp-sp-include-anote', s.includeAuthorsNote);
+        gC('scp-sp-include-charcard', s.includeCharacterCard);
+        gC('scp-sp-include-persona', s.includeUserPersonality);
+        g('scp-sp-reasoning-trim', s.reasoningTrimStrings);
+        g('scp-sp-sysprompt', s.systemPrompt || DEFAULT_SYSTEM_PROMPT);
+        g('scp-sp-lb-manage-prompt', s.lorebookManagePrompt || DEFAULT_LB_MANAGE_PROMPT);
+        g('scp-sp-lb-st-scan-depth', s.lorebookSTScanDepth);
+        g('scp-sp-lb-copilot-scan-depth', s.lorebookCopilotScanDepth);
+
+        refreshSPProfilesDropdown();
+        updateSPConnProfileList();
+
+        // Session tab — show effective values, highlight overridden keys
+        const ovDs = document.getElementById('scp-sp-ov-depth-slider');
+        const ovDv = document.getElementById('scp-sp-ov-depth-val');
+        if (ovDs) ovDs.value = eff.contextDepth ?? 15;
+        if (ovDv) ovDv.textContent = eff.contextDepth ?? 15;
+
+        g('scp-sp-ov-conn-source', eff.connectionSource ?? 'default');
+        const ovPg = document.getElementById('scp-sp-ov-profile-group');
+        if (ovPg) ovPg.style.display = eff.connectionSource === 'profile' ? '' : 'none';
+        
+        g('scp-sp-ov-conn-profile', eff.connectionProfileId ?? '');
+
+        const ovi = (id, key) => { const el = document.getElementById(id); if (el) el.value = key in ov ? ov[key] ?? '' : ''; };
+        ovi('scp-sp-ov-max-tokens', 'maxTokens');
+        ovi('scp-sp-ov-history-limit', 'localHistoryLimit');
+        ovi('scp-sp-ov-reasoning-trim', 'reasoningTrimStrings');
+        ovi('scp-sp-ov-sysprompt', 'systemPrompt');
+
+        gC('scp-sp-ov-include-sysprompt', eff.includeSystemPrompt);
+        gC('scp-sp-ov-include-anote', eff.includeAuthorsNote);
+        gC('scp-sp-ov-include-charcard', eff.includeCharacterCard);
+        gC('scp-sp-ov-include-persona', eff.includeUserPersonality);
+
+        updateSPOverrideIndicators();
+    }
+
+    async function updateSPConnProfileList() {
+        const selIds =['scp-sp-conn-profile', 'scp-sp-ov-conn-profile'];
+        const s = getSettings();
+        const eff = getEffectiveSettings();
+        const ctx = SillyTavern.getContext();
+        let profiles = [];
+        try {
+            if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
+                const result = await ctx.executeSlashCommandsWithOptions('/profile-list');
+                if (result?.pipe) profiles = JSON.parse(result.pipe);
+            }
+        } catch (_) {}
+        if (!profiles.length) {
+            const nativeSel = document.getElementById('connection_profile');
+            if (nativeSel?.options) {
+                for (const opt of Array.from(nativeSel.options)) {
+                    if (opt.value && opt.value !== 'default' && opt.value !== 'gui') profiles.push(opt.textContent.trim());
+                }
+            }
+        }
+        selIds.forEach(sid => {
+            const sel = document.getElementById(sid); if (!sel) return;
+            const isOverride = sid === 'scp-sp-ov-conn-profile';
+            const targetVal = isOverride ? (eff.connectionProfileId || '') : (s.connectionProfileId || '');
+            sel.innerHTML = '<option value="">-- Select Profile --</option>';
+            profiles.forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = p; sel.appendChild(o); });
+            if (Array.from(sel.options).some(o => o.value === targetVal)) sel.value = targetVal;
+        });
+    }
+
+    function refreshSPProfilesDropdown() {
+        const sel = document.getElementById('scp-sp-profile-select'); if (!sel) return;
+        const s = getSettings();
+        if (!Object.keys(s.profiles).length) {
+            s.profiles['Default'] = { systemPrompt: DEFAULT_SYSTEM_PROMPT, includeSystemPrompt: true, includeAuthorsNote: true, includeCharacterCard: true, includeUserPersonality: true, contextDepth: 15, localHistoryLimit: 50, connectionSource: 'default', connectionProfileId: '', maxTokens: 2048 };
+            s.activeProfile = 'Default'; saveSettings();
+        }
+        sel.innerHTML = '';
+        for (const name of Object.keys(s.profiles)) {
+            const opt = document.createElement('option'); opt.value = name; opt.textContent = name;
+            if (name === s.activeProfile) opt.selected = true;
+            sel.appendChild(opt);
+        }
+        updateSPBindingSection();
+    }
+
+    function updateSPBindingSection() {
+        const sel = document.getElementById('scp-sp-profile-select');
+        const section = document.getElementById('scp-sp-binding-section');
+        if (!section) return;
+        section.style.display = sel?.value ? '' : 'none';
+        if (!sel?.value) return;
+        const s = getSettings(); const { charId, chatId } = getBindingKey();
+        document.getElementById('scp-sp-bind-char')?.classList.toggle('active', s.profileBindings[`char_${charId}`] === sel.value);
+        document.getElementById('scp-sp-bind-chat')?.classList.toggle('active', s.profileBindings[`chat_${charId}_${chatId}`] === sel.value);
+    }
+
+    function openExtensionSettings() { openSettingsPanel(); }
+
+    // ─── Settings Panel Listeners ────────────────────────────────────────────────
+
+    function setupSettingsPanelListeners() {
+        const overlay = document.getElementById('scp-settings-overlay');
+        if (!overlay) return;
+
+        // Close
+        document.getElementById('scp-sp-close')?.addEventListener('click', closeSettingsPanel);
+        overlay.addEventListener('click', e => { if (e.target === overlay) closeSettingsPanel(); });
+
+        // Tab switching
+        overlay.querySelectorAll('.scp-sp-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                overlay.querySelectorAll('.scp-sp-tab').forEach(t => t.classList.remove('active'));
+                overlay.querySelectorAll('.scp-sp-tab-pane').forEach(p => { p.style.display = 'none'; });
+                tab.classList.add('active');
+                const pane = document.getElementById(`scp-sp-pane-${tab.dataset.sptab}`);
+                if (pane) pane.style.display = '';
+            });
+        });
+
+        // ── GLOBAL SETTINGS ──
+
+        const saveGlobal = (key, val, cb) => {
+            getSettings()[key] = val; saveSettings();
+            // Sync to ST drawer if open
+            const stEl = document.getElementById({
+                enabled:'scp-enabled', hotkeyEnabled:'scp-hotkey-enabled', hotkey:'scp-hotkey',
+                floatingIconPersistent:'scp-icon-persistent', connectionSource:'scp-conn-source',
+                maxTokens:'scp-max-tokens', localHistoryLimit:'scp-history-limit',
+                contextDepth:'scp-depth-slider', includeSystemPrompt:'scp-include-sysprompt',
+                includeAuthorsNote:'scp-include-anote', includeCharacterCard:'scp-include-charcard',
+                includeUserPersonality:'scp-include-persona', reasoningTrimStrings:'scp-reasoning-trim',
+                systemPrompt:'scp-sysprompt', lorebookManagePrompt:'scp-lb-manage-prompt',
+                lorebookSTScanDepth:'scp-lb-st-scan-depth', lorebookCopilotScanDepth:'scp-lb-copilot-scan-depth',
+                connectionProfileId:'scp-conn-profile'
+            }[key]);
+            if (stEl) {
+                if (stEl.type === 'checkbox') stEl.checked = !!val;
+                else stEl.value = val ?? '';
+                
+                if (key === 'connectionSource') {
+                    const stGroup = document.getElementById('scp-profile-group');
+                    if (stGroup) stGroup.style.display = val === 'profile' ? '' : 'none';
+                }
+            }
+
+            syncOverlayUI(key, val);
+
+            if (cb) cb(val);
+        };
+
+        const bGCheck = (spId, key, cb) => {
+            const el = document.getElementById(spId); if (!el) return;
+            el.addEventListener('change', () => saveGlobal(key, el.checked, cb));
+        };
+        const bGInput = (spId, key, toVal, cb) => {
+            const el = document.getElementById(spId); if (!el) return;
+            el.addEventListener('input', () => saveGlobal(key, toVal ? toVal(el.value) : el.value, cb));
+        };
+        const bGSelect = (spId, key, cb) => {
+            const el = document.getElementById(spId); if (!el) return;
+            el.addEventListener('change', () => saveGlobal(key, el.value, cb));
+        };
+
+        bGCheck('scp-sp-enabled', 'enabled', () => {
+            const ss = getSettings();
+            const btn = document.getElementById('scp-wand-btn');
+            if (btn) btn.style.display = ss.enabled ? '' : 'none';
+            if (!ss.enabled) hideWindow();
+            setupHotkey();
+        });
+        bGCheck('scp-sp-hotkey-enabled', 'hotkeyEnabled', setupHotkey);
+        bGInput('scp-sp-hotkey', 'hotkey', null, setupHotkey);
+        bGCheck('scp-sp-icon-persistent', 'floatingIconPersistent', () => {
+            const ss = getSettings();
+            const isTouchDevice = 'ontouchstart' in window;
+            if (ss.floatingIconPersistent || ss.minimized || (!ss.windowVisible && isTouchDevice)) {
+                if (iconEl) iconEl.style.display = 'flex';
+            } else {
+                if (iconEl) iconEl.style.display = 'none';
+            }
+        });
+
+        bGSelect('scp-sp-conn-source', 'connectionSource', v => {
+            const gCp = document.getElementById('scp-sp-global-profile-group');
+            if (gCp) gCp.style.display = v === 'profile' ? '' : 'none';
+            if (v === 'profile') updateSPConnProfileList();
+        });
+        document.getElementById('scp-sp-conn-profile')?.addEventListener('mouseenter', updateSPConnProfileList);
+        document.getElementById('scp-sp-conn-profile')?.addEventListener('change', e => saveGlobal('connectionProfileId', e.target.value));
+
+        bGInput('scp-sp-max-tokens', 'maxTokens', Number);
+        bGInput('scp-sp-history-limit', 'localHistoryLimit', Number, () => updateMsgCount(getCurrentSession()));
+
+        const spDs = document.getElementById('scp-sp-depth-slider');
+        const spDv = document.getElementById('scp-sp-depth-val');
+        if (spDs) {
+            spDs.addEventListener('input', () => { if (spDv) spDv.textContent = spDs.value; });
+            spDs.addEventListener('change', () => {
+                saveGlobal('contextDepth', parseInt(spDs.value), () => updateMsgCount(getCurrentSession()));
+                const stSlider = document.getElementById('scp-depth-slider');
+                const stVal = document.getElementById('scp-depth-val');
+                if (stSlider) stSlider.value = spDs.value;
+                if (stVal) stVal.textContent = spDs.value;
+            });
         }
 
-        setTimeout(() => {
-            const settingsBlock = document.querySelector('.st-copilot-settings .inline-drawer') || document.querySelector('.st-copilot-settings');
-            
-            if (settingsBlock) {
-                settingsBlock.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        bGCheck('scp-sp-include-sysprompt', 'includeSystemPrompt', () => updateMsgCount(getCurrentSession()));
+        bGCheck('scp-sp-include-anote', 'includeAuthorsNote', () => updateMsgCount(getCurrentSession()));
+        bGCheck('scp-sp-include-charcard', 'includeCharacterCard', () => updateMsgCount(getCurrentSession()));
+        bGCheck('scp-sp-include-persona', 'includeUserPersonality', () => updateMsgCount(getCurrentSession()));
+        bGInput('scp-sp-reasoning-trim', 'reasoningTrimStrings');
 
-                const content = settingsBlock.querySelector('.inline-drawer-content');
-                const isClosed = content && getComputedStyle(content).display === 'none';
+        document.getElementById('scp-sp-conn-source')?.addEventListener('change', e => {
+            const v = e.target.value;
+            saveGlobal('connectionSource', v, null);
+            const gCp = document.getElementById('scp-sp-global-profile-group');
+            if (gCp) gCp.style.display = v === 'profile' ? '' : 'none';
+            if (v === 'profile') updateSPConnProfileList();
+        });
+        document.getElementById('scp-sp-conn-profile')?.addEventListener('mouseenter', updateSPConnProfileList);
+        document.getElementById('scp-sp-conn-profile')?.addEventListener('change', e => saveGlobal('connectionProfileId', e.target.value, null));
 
-                if (isClosed) {
-                    const header = settingsBlock.querySelector('.inline-drawer-header') || 
-                                   settingsBlock.querySelector('.inline-drawer-toggle');
-                    header?.click();
-                }
+        const spPrompt = document.getElementById('scp-sp-sysprompt');
+        if (spPrompt) spPrompt.addEventListener('input', () => saveGlobal('systemPrompt', spPrompt.value, () => updateMsgCount(getCurrentSession())));
+        document.getElementById('scp-sp-reset-prompt')?.addEventListener('click', async () => {
+            const ok = await showCustomDialog({ type: 'confirm', title: 'Reset System Prompt', message: 'Reset to default?' });
+            if (!ok) return;
+            getSettings().systemPrompt = DEFAULT_SYSTEM_PROMPT;
+            saveSettings();
+            if (spPrompt) spPrompt.value = DEFAULT_SYSTEM_PROMPT;
+            const stPrompt = document.getElementById('scp-sysprompt');
+            if (stPrompt) stPrompt.value = DEFAULT_SYSTEM_PROMPT;
+            updateMsgCount(getCurrentSession());
+            toastr.success('System prompt reset.', EXT_DISPLAY);
+        });
 
-                settingsBlock.style.transition = 'box-shadow 0.5s';
-                settingsBlock.style.boxShadow = '0 0 15px var(--scp-accent)';
-                setTimeout(() => { settingsBlock.style.boxShadow = ''; }, 1500);
-            } else {
-                toastr.info('Settings block not found in the drawer. Make sure the extension is loaded.', EXT_DISPLAY);
+        bGInput('scp-sp-lb-manage-prompt', 'lorebookManagePrompt');
+        document.getElementById('scp-sp-reset-lb-prompt')?.addEventListener('click', async () => {
+            const ok = await showCustomDialog({ type: 'confirm', title: 'Reset LB Prompt', message: 'Reset to default?' });
+            if (!ok) return;
+            getSettings().lorebookManagePrompt = DEFAULT_LB_MANAGE_PROMPT;
+            saveSettings();
+            const el = document.getElementById('scp-sp-lb-manage-prompt'); if (el) el.value = DEFAULT_LB_MANAGE_PROMPT;
+            const stEl = document.getElementById('scp-lb-manage-prompt'); if (stEl) stEl.value = DEFAULT_LB_MANAGE_PROMPT;
+            toastr.success('Lorebook prompt reset.', EXT_DISPLAY);
+        });
+        bGInput('scp-sp-lb-st-scan-depth', 'lorebookSTScanDepth', Number);
+        bGInput('scp-sp-lb-copilot-scan-depth', 'lorebookCopilotScanDepth', Number);
+
+        // Config profiles
+        document.getElementById('scp-sp-profile-select')?.addEventListener('change', async () => {
+            const sel = document.getElementById('scp-sp-profile-select'); if (!sel?.value) return;
+            if (isConfigProfileDirty()) {
+                const ok = await showCustomDialog({ type: 'confirm', title: 'Unsaved Configuration', message: 'Unsaved changes in current profile. Switch anyway?' });
+                if (!ok) { sel.value = getSettings().activeProfile || ''; return; }
             }
-        }, isDrawerOpen ? 10 : 50);
+            loadProfile(sel.value);
+            syncSPFromSettings();
+            updateSettingsUI();
+            updateSPBindingSection();
+        });
+        document.getElementById('scp-sp-profile-save')?.addEventListener('click', async () => {
+            const sel = document.getElementById('scp-sp-profile-select');
+            let name = sel?.value;
+            if (!name) {
+                name = await showCustomDialog({ type: 'prompt', title: 'Save Configuration', message: 'Profile name:', placeholder: 'My Config' });
+                if (!name?.trim()) return;
+                name = name.trim();
+            }
+            saveProfile(name); refreshSPProfilesDropdown(); refreshProfilesDropdown();
+            if (sel) sel.value = name;
+            updateSPBindingSection(); toastr.success(`Saved "${name}"`, EXT_DISPLAY);
+        });
+        document.getElementById('scp-sp-profile-create')?.addEventListener('click', async () => {
+            const name = await showCustomDialog({ type: 'prompt', title: 'New Configuration', message: 'Name:', placeholder: 'New Config' });
+            if (!name?.trim()) return;
+            const n = name.trim(); const s = getSettings();
+            s.profiles[n] = { systemPrompt: DEFAULT_SYSTEM_PROMPT, includeSystemPrompt: true, includeAuthorsNote: true, includeCharacterCard: true, includeUserPersonality: true, contextDepth: 15, localHistoryLimit: 50, connectionSource: 'default', connectionProfileId: '', maxTokens: 2048 };
+            saveSettings(); refreshSPProfilesDropdown(); refreshProfilesDropdown();
+            loadProfile(n); syncSPFromSettings(); updateSettingsUI();
+            const sel = document.getElementById('scp-sp-profile-select'); if (sel) sel.value = n;
+            updateSPBindingSection(); toastr.success(`Created "${n}"`, EXT_DISPLAY);
+        });
+        document.getElementById('scp-sp-profile-rename')?.addEventListener('click', async () => {
+            const sel = document.getElementById('scp-sp-profile-select'); if (!sel?.value) return;
+            const newName = await showCustomDialog({ type: 'prompt', title: 'Rename', message: 'New name:', defaultValue: sel.value });
+            if (!newName?.trim() || newName.trim() === sel.value) return;
+            const s = getSettings(); const p = s.profiles[sel.value]; if (!p) return;
+            s.profiles[newName.trim()] = p; delete s.profiles[sel.value];
+            if (s.activeProfile === sel.value) s.activeProfile = newName.trim();
+            for (const k in s.profileBindings) { if (s.profileBindings[k] === sel.value) s.profileBindings[k] = newName.trim(); }
+            saveSettings(); refreshSPProfilesDropdown(); refreshProfilesDropdown();
+            const newSel = document.getElementById('scp-sp-profile-select'); if (newSel) newSel.value = newName.trim();
+            updateSPBindingSection(); toastr.success('Renamed.', EXT_DISPLAY);
+        });
+        document.getElementById('scp-sp-profile-delete')?.addEventListener('click', async () => {
+            const sel = document.getElementById('scp-sp-profile-select'); if (!sel?.value) return;
+            const s = getSettings();
+            if (Object.keys(s.profiles).length <= 1) { toastr.warning('Cannot delete the last profile.', EXT_DISPLAY); return; }
+            const ok = await showCustomDialog({ type: 'confirm', title: 'Delete Profile', message: `Delete "${sel.value}"?` });
+            if (!ok) return;
+            deleteProfile(sel.value); refreshSPProfilesDropdown(); refreshProfilesDropdown();
+            updateSPBindingSection(); toastr.success('Deleted.', EXT_DISPLAY);
+        });
+        document.getElementById('scp-sp-bind-char')?.addEventListener('click', () => {
+            const sel = document.getElementById('scp-sp-profile-select'); if (!sel?.value) return;
+            const s = getSettings(); const { charId } = getBindingKey(); const key = `char_${charId}`;
+            if (s.profileBindings[key] === sel.value) delete s.profileBindings[key];
+            else s.profileBindings[key] = sel.value;
+            saveSettings(); updateSPBindingSection(); updateBindingSection();
+        });
+        document.getElementById('scp-sp-bind-chat')?.addEventListener('click', () => {
+            const sel = document.getElementById('scp-sp-profile-select'); if (!sel?.value) return;
+            const s = getSettings(); const { charId, chatId } = getBindingKey(); const key = `chat_${charId}_${chatId}`;
+            if (s.profileBindings[key] === sel.value) delete s.profileBindings[key];
+            else s.profileBindings[key] = sel.value;
+            saveSettings(); updateSPBindingSection(); updateBindingSection();
+        });
+
+        document.getElementById('scp-sp-clear-sessions')?.addEventListener('click', async () => {
+            const ok = await showCustomDialog({ type: 'confirm', title: 'Clear All Sessions', message: 'Delete ALL Copilot sessions for all characters? This cannot be undone.', delayConfirm: 3 });
+            if (!ok) return;
+            getSettings().sessions = {}; saveSettings(); onChatChanged();
+            toastr.success('All sessions cleared.', EXT_DISPLAY);
+        });
+
+        // ── SESSION OVERRIDES ──
+
+        // Auto-clear override if new value === global value
+        const syncOvClear = (key, newVal) => {
+            const globalVal = getSettings()[key];
+            const isDefault = (newVal === undefined || newVal === null || newVal === '')
+                ? true
+                : (typeof globalVal === 'boolean'
+                    ? newVal === globalVal
+                    : String(newVal) === String(globalVal));
+            if (isDefault) setSessionOverride(key, undefined);
+            else setSessionOverride(key, newVal);
+            updateSPOverrideIndicators();
+            updateMsgCount(getCurrentSession());
+        };
+
+        const bindOvCheck = (spId, key) => {
+            const el = document.getElementById(spId); if (!el) return;
+            el.addEventListener('change', () => syncOvClear(key, el.checked));
+        };
+        const bindOvInput = (spId, key, toVal) => {
+            const el = document.getElementById(spId); if (!el) return;
+            el.addEventListener('input', () => {
+                const raw = el.value === '' ? undefined : (toVal ? toVal(el.value) : el.value);
+                syncOvClear(key, raw);
+            });
+        };
+
+        const ovDs = document.getElementById('scp-sp-ov-depth-slider');
+        const ovDv = document.getElementById('scp-sp-ov-depth-val');
+        if (ovDs) {
+            ovDs.addEventListener('input', () => { if (ovDv) ovDv.textContent = ovDs.value; });
+            ovDs.addEventListener('change', () => syncOvClear('contextDepth', parseInt(ovDs.value)));
+        }
+
+        document.getElementById('scp-sp-ov-conn-source')?.addEventListener('change', e => {
+            syncOvClear('connectionSource', e.target.value);
+            const pg = document.getElementById('scp-sp-ov-profile-group');
+            if (pg) pg.style.display = e.target.value === 'profile' ? '' : 'none';
+            if (e.target.value === 'profile') updateSPConnProfileList();
+        });
+        document.getElementById('scp-sp-ov-conn-profile')?.addEventListener('mouseenter', updateSPConnProfileList);
+        document.getElementById('scp-sp-ov-conn-profile')?.addEventListener('change', e => {
+            syncOvClear('connectionProfileId', e.target.value);
+        });
+
+        bindOvInput('scp-sp-ov-max-tokens', 'maxTokens', Number);
+        bindOvInput('scp-sp-ov-history-limit', 'localHistoryLimit', Number);
+        bindOvInput('scp-sp-ov-reasoning-trim', 'reasoningTrimStrings');
+
+        const ovPrompt = document.getElementById('scp-sp-ov-sysprompt');
+        if (ovPrompt) ovPrompt.addEventListener('input', () => syncOvClear('systemPrompt', ovPrompt.value || undefined));
+
+        bindOvCheck('scp-sp-ov-include-sysprompt', 'includeSystemPrompt');
+        bindOvCheck('scp-sp-ov-include-anote', 'includeAuthorsNote');
+        bindOvCheck('scp-sp-ov-include-charcard', 'includeCharacterCard');
+        bindOvCheck('scp-sp-ov-include-persona', 'includeUserPersonality');
+
+        // Clear individual override buttons
+        overlay.querySelectorAll('.scp-sp-ov-clear[data-ovkey]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const key = btn.dataset.ovkey;
+                setSessionOverride(key, undefined);
+                // Re-sync that specific field from effective settings
+                const eff = getEffectiveSettings();
+                const ov = getSessionOverrides();
+                const elMap = {
+                    contextDepth: ['scp-sp-ov-depth-slider', 'scp-sp-ov-depth-val'],
+                    maxTokens: ['scp-sp-ov-max-tokens'],
+                    localHistoryLimit: ['scp-sp-ov-history-limit'],
+                    reasoningTrimStrings: ['scp-sp-ov-reasoning-trim'],
+                    systemPrompt: ['scp-sp-ov-sysprompt'],
+                    connectionSource: ['scp-sp-ov-conn-source'],
+                    connectionProfileId: ['scp-sp-ov-conn-profile'],
+                    includeSystemPrompt: ['scp-sp-ov-include-sysprompt'],
+                    includeAuthorsNote: ['scp-sp-ov-include-anote'],
+                    includeCharacterCard: ['scp-sp-ov-include-charcard'],
+                    includeUserPersonality: ['scp-sp-ov-include-persona'],
+                };
+                (elMap[key] || []).forEach(id => {
+                    const el = document.getElementById(id); if (!el) return;
+                    if (id.includes('depth-val')) { el.textContent = eff.contextDepth ?? 15; return; }
+                    if (el.type === 'checkbox') el.checked = !!eff[key];
+                    else if (el.type === 'range') el.value = eff[key] ?? 15;
+                    else if (id === 'scp-sp-ov-conn-source') {
+                        el.value = eff.connectionSource ?? 'default';
+                        const pg = document.getElementById('scp-sp-ov-profile-group');
+                        if (pg) pg.style.display = el.value === 'profile' ? '' : 'none';
+                    }
+                    else if (id === 'scp-sp-ov-conn-profile') {
+                        el.value = eff.connectionProfileId ?? '';
+                    }
+                    else el.value = (key in ov ? ov[key] : '') ?? '';
+                });
+                updateSPOverrideIndicators();
+                updateMsgCount(getCurrentSession());
+            });
+        });
+
+        document.getElementById('scp-sp-reset-all-overrides')?.addEventListener('click', async () => {
+            if (!hasSessionOverrides()) { toastr.info('No session overrides active.', EXT_DISPLAY); return; }
+            const ok = await showCustomDialog({ type: 'confirm', title: 'Reset Session Overrides', message: 'Clear all session overrides for this session?' });
+            if (!ok) return;
+            clearAllSessionOverrides();
+            syncSPFromSettings();
+            updateMsgCount(getCurrentSession());
+            toastr.success('Session overrides cleared.', EXT_DISPLAY);
+        });
     }
 
     // ─── Window Event Listeners ─────────────────────────────────────────────────
@@ -4377,8 +5506,10 @@
             });
             
             depthSlider.addEventListener('change', () => {
-                getSettings().contextDepth = parseInt(depthSlider.value); 
+                const val = parseInt(depthSlider.value);
+                getSettings().contextDepth = val; 
                 saveSettings();
+                syncOverlayUI('contextDepth', val);
                 updateMsgCount(getCurrentSession());
             });
         }
@@ -4398,6 +5529,44 @@
             }, { passive: false });
             lbBtn.addEventListener('click', () => { if (!_lbTouchPending) openLorebookManager(); });
         }
+
+        // Search
+        $('scp-search-btn')?.addEventListener('click', () => { _searchOpen ? closeSearch() : openSearch(); });
+        $('scp-search-close')?.addEventListener('click', closeSearch);
+        $('scp-search-prev')?.addEventListener('click', () => navigateSearch(-1));
+        $('scp-search-next')?.addEventListener('click', () => navigateSearch(1));
+        $('scp-search-word')?.addEventListener('click', () => {
+            _searchWholeWord = !_searchWholeWord;
+            $('scp-search-word')?.classList.toggle('active', _searchWholeWord);
+            if (_searchQuery.trim()) performSearch();
+        });
+
+        const searchInputEl = $('scp-search-input');
+        if (searchInputEl) {
+            searchInputEl.addEventListener('input', () => {
+                _searchQuery = searchInputEl.value;
+                clearTimeout(_searchDebounceId);
+                _searchDebounceId = setTimeout(performSearch, 220);
+            });
+            searchInputEl.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { e.preventDefault(); navigateSearch(e.shiftKey ? -1 : 1); }
+                if (e.key === 'Escape') { e.stopPropagation(); closeSearch(); }
+            });
+        }
+
+        // Ctrl+F / Cmd+F opens search;
+        document.addEventListener('keydown', e => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+                const win = document.getElementById(WIN_ID);
+                if (!win || win.style.display === 'none') return;
+                const active = document.activeElement;
+                if (active && !win.contains(active) && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                if (_searchOpen) { document.getElementById('scp-search-input')?.focus(); }
+                else openSearch();
+            }
+        }, true);
         $('scp-stop-btn')?.addEventListener('click', () => {
             _abortController?.abort();
             const { stopGeneration } = SillyTavern.getContext();
@@ -4435,10 +5604,13 @@
     // ─── Chat Change ─────────────────────────────────────────────────────────────
 
     function onChatChanged() {
+        _lastChatLen = -1;
         updateCharBadge();
         refreshSessionDropdown();
         renderSession(getCurrentSession());
         autoLoadBoundProfile();
+        updateSessionOverrideIndicator();
+        updateDepthSlidersMax();
     }
 
     // ─── Wand Button ─────────────────────────────────────────────────────────────
@@ -4469,7 +5641,7 @@
                 if (html) container.insertAdjacentHTML('beforeend', html);
             } catch (e) {}
         }
-        restoreWindowState(); attachWindowListeners(); setupSettingsHandlers(); setupLorebookManagerListeners();
+        restoreWindowState(); attachWindowListeners(); setupSettingsHandlers(); setupLorebookManagerListeners(); setupSettingsPanelListeners();
         const s = getSettings();
         if (s.windowVisible) {
             if (s.minimized) iconEl.style.display = 'flex';
@@ -4477,20 +5649,27 @@
         }
         if (s.floatingIconPersistent) iconEl.style.display = 'flex';
         onChatChanged();
-        if (ctx.eventSource && ctx.event_types) {
-            ctx.eventSource.on(ctx.event_types.CHAT_CHANGED, onChatChanged);
-            ctx.eventSource.on(ctx.event_types.CHARACTER_SELECTED, onChatChanged);
-            ctx.eventSource.on(ctx.event_types.APP_READY, updateProfilesList);
-        } else {
-            try {
-                const es = window.eventSource; const et = window.event_types;
-                if (es && et) {
-                    es.on(et.CHAT_CHANGED, onChatChanged);
-                    es.on(et.CHARACTER_SELECTED, onChatChanged);
-                    es.on(et.APP_READY, updateProfilesList);
-                }
-            } catch (_) {}
+        const es = ctx.eventSource || window.eventSource;
+        const et = ctx.event_types || window.event_types || {};
+
+        if (es) {
+            es.on(et.CHAT_CHANGED || 'chat_changed', onChatChanged);
+            es.on(et.CHARACTER_SELECTED || 'character_selected', onChatChanged);
+            es.on(et.APP_READY || 'app_ready', updateProfilesList);
+            
+            const dynEvents =[
+                et.MESSAGE_RECEIVED || 'message_received',
+                et.MESSAGE_SENT || 'message_sent',
+                et.MESSAGE_DELETED || 'message_deleted',
+                et.MESSAGE_UPDATED || 'message_updated',
+                et.MESSAGE_SWIPED || 'message_swiped'
+            ];
+            
+            dynEvents.forEach(e => { 
+                if (e) es.on(e, updateDepthSlidersMax); 
+            });
         }
+        
         setupHotkey(); addWandButton();
         console.log(`[${EXT_DISPLAY}] Initialized.`);
     }
