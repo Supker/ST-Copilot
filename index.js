@@ -4735,8 +4735,6 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             }
             
             if (!posValid) {
-                // Явно вычисляем и задаём стартовую позицию через JS (left/top)
-                // чтобы избежать багов с позиционированием через right/bottom в мобильном Safari/Chrome
                 const defaultRight = isMobile ? 16 : 20;
                 const defaultBottom = isMobile ? 120 : 80;
                 iconEl.style.left = `${Math.max(0, vw - iconSize - defaultRight)}px`;
@@ -4768,10 +4766,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             return;
         }
         
-        const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-        
-        // Показываем если: закрыто, свернуто, persistent ИЛИ это мобилка
-        if (!s.windowVisible || s.minimized || s.floatingIconPersistent || isTouchDevice) {
+        if (s.minimized || s.floatingIconPersistent) {
             iconEl.style.setProperty('display', 'flex', 'important');
         } else {
             iconEl.style.setProperty('display', 'none', 'important');
