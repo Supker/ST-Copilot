@@ -6,6 +6,7 @@
     const WIN_ID = 'scp-window';
     const ICON_ID = 'scp-dock-icon';
     const MODAL_ID = 'scp-ctx-modal';
+    const ICON_STORAGE_KEY = 'scp-icon-position';
     let ST_WorldInfo = null;
     let ST_Utils = null;
 
@@ -53,36 +54,33 @@
     `Your ultimate goal is to enhance the user\'s roleplay experience by providing deep OOC insights, tracking lore, and answering questions based on your specific persona configuration.\n` +
     `</system_prompt>\n`;
 
-    const DEFAULT_LB_MANAGE_PROMPT =
-    "<context>\n" +
-    "A Lorebook (or World Info) is a dynamic memory system used in roleplay to store and seamlessly retrieve facts about the world, characters, locations, items, and lore. When specific keywords (`triggers`) are mentioned in the chat, the system secretly injects the corresponding `content` into the AI's prompt.\n" +
-    "</context>\n" +
-    "\n" +
-    "<system_mechanics>\n" +
-    "After you generate a proposal, a background script extracts your `lorebook-changes` block for the user's UI. Once the user makes a decision, the system AUTOMATICALLY DELETES the code block from your message history to save context tokens. \n" +
-    "If you look at the chat history and notice your previous `lorebook-changes` blocks are missing, understand that this is intentional system behavior. You successfully delivered them. Do NOT re-generate, repeat, or fix missing blocks from past messages.\n" +
-    "</system_mechanics>\n" +
-    "\n" +
-    "<guidelines>\n" +
-    "1. Authorization Role: You act as a Drafting Advisor. You are authorized to PROPOSE Lorebook updates ONLY when explicitly commanded by the user. You do not apply changes directly; the user makes the final decision.\n" +
-    "2. Cognitive Processing & Explanation: Before generating the proposal block, you MUST explain your reasoning in your regular conversational response. Briefly describe what entry you are proposing to add, edit, or delete, and why. \n" +
-    "3. Conversational Flow: Since your code blocks will be deleted later, do not end your conversational text with phrases like \"Here is the code block below:\". Treat the code block as a detached technical appendix.\n" +
-    "4. Semantic Restrictions: ALWAYS use language indicating a suggestion (e.g., \"I propose adding...\", \"I suggest editing...\"). NEVER state that changes have been \"applied\", \"saved\", or \"made\", as you only generate drafts.\n" +
-    "5. Semantic Density of Entries: Write `content` that is concise, factual, and information-dense. Avoid fluff to minimize token consumption.\n" +
-    "6. Trigger Optimization: Choose `triggers` carefully. Use specific nouns, names, or unique phrases. Avoid overly generic words.\n" +
-    "7. Target Definition and Naming Conventions (CRITICAL):\n" +
-    "   - Currently active lorebooks: {{active_lorebooks}}\n" +
-    "   - Modifying Existing: If your target lorebook exists in the active list above, you MUST apply absolute strict string matching. Do not alter spelling, spacing, capitalization, or punctuation.\n" +
-    "   - Creating New: If the context requires a categorization not present in the active list, you are authorized to draft a NEW lorebook. Assign it a concise, logical name.\n" +
-    "</guidelines>\n" +
-    "\n" +
-    "<output_formatting>\n" +
-    "When proposing changes, generate a markdown code block tagged exactly as `lorebook-changes`.\n" +
-    "This block MUST be placed at the very end of your message, after all conversational text.\n" +
-    "\n" +
-    "Format requirement (Strictly adhere to this JSON structure):\n" +
-    "{{lorebook_output}}\n" +
-    "</output_formatting>";
+    const DEFAULT_LB_MANAGE_PROMPT = 
+    `<context>\n` +
+    `A Lorebook (or World Info) is a dynamic memory system used in roleplay to store and seamlessly retrieve facts about the world, characters, locations, items, and lore. When specific keywords (\`triggers\`) are mentioned in the chat, the system secretly injects the corresponding \`content\` into the AI's prompt.\n` +
+    `</context>\n\n` +
+    `<system_mechanics>\n` +
+    `After you generate a proposal, a background script extracts your \`lorebook-changes\` block for the user's UI. Once the user makes a decision, the system AUTOMATICALLY DELETES the code block from your message history to save context tokens. \n` +
+    `If you look at the chat history and notice your previous \`lorebook-changes\` blocks are missing, understand that this is intentional system behavior. You successfully delivered them. Do NOT re-generate, repeat, or fix missing blocks from past messages.\n` +
+    `</system_mechanics>\n\n` +
+    `<guidelines>\n` +
+    `1. Authorization Role: You are authorized to PROPOSE Lorebook updates ONLY when explicitly commanded by the user. You do not apply changes directly; the user makes the final decision.\n` +
+    `2. Cognitive Processing & Explanation: Before generating the proposal block, you MUST explain your reasoning in your regular conversational response. Briefly describe what entry you are proposing to add, edit, or delete, and why. \n` +
+    `3. Conversational Flow: Since your code blocks will be deleted later, do not end your conversational text with phrases like "Here is the code block below:". Treat the code block as a detached technical appendix.\n` +
+    `4. Semantic Restrictions: ALWAYS use language indicating a suggestion (e.g., "I propose adding...", "I suggest editing..."). NEVER state that changes have been "applied", "saved", or "made", as you only generate drafts.\n` +
+    `5. Semantic Density of Entries: Write \`content\` that is concise, factual, and information-dense. Avoid fluff to minimize token consumption.\n` +
+    `6. Objective & Timeless Content (CRITICAL): Entries (characters, locations, items, lore, etc.) MUST NOT be tied to the current story progression, plot developments, or recent chat events. Write them as objective, standalone encyclopedic descriptions that exist entirely independently of the ongoing narrative. \n` +
+    `7. Trigger Optimization: Choose \`triggers\` carefully. Use specific nouns, names, or unique phrases. Avoid overly generic words.\n` +
+    `8. Target Definition and Naming Conventions (CRITICAL):\n` +
+    `   - Currently active lorebooks: {{active_lorebooks}}\n` +
+    `   - Modifying Existing: If your target lorebook exists in the active list above, you MUST apply absolute strict string matching. Do not alter spelling, spacing, capitalization, or punctuation.\n` +
+    `   - Creating New: If the context requires a categorization not present in the active list, you are authorized to draft a NEW lorebook. Assign it a concise, logical name.\n` +
+    `</guidelines>\n\n` +
+    `<output_formatting>\n` +
+    `When proposing changes, generate a markdown code block tagged exactly as \`lorebook-changes\`.\n` +
+    `This block MUST be placed at the very end of your message, after all conversational text.\n\n` +
+    `Format requirement (Strictly adhere to this JSON structure):\n` +
+    `{{lorebook_output}}\n` +
+    `</output_formatting>`;
 
     const LB_FORMAT_BLOCK =
     '```lorebook-changes\n' +
@@ -98,7 +96,20 @@
 
     const THEME_PRESETS = {
         default: {
-            label: 'Default Dark',
+            label: 'Dark Sky',
+            bg: 'rgba(0,0,0,0.85)', blur: 'blur(14px)',
+            text: '#e2e2e6', textMuted: 'rgb(176,176,176)',
+            accent: 'rgb(191,191,191)', accentDim: 'rgba(209,209,209,0.4)',
+            accentBg: 'rgba(112,112,112,0.08)',
+            headerBg: 'rgba(255,255,255,0.04)', toolbarBg: 'rgba(0,0,0,0.25)',
+            msgUserBg: 'rgba(214,214,214,0.1)', msgAiBg: 'rgba(214,214,214,0.03)',
+            inputBg: 'rgba(0,0,0,0.30)', codeBg: 'rgba(0,0,0,0.35)',
+            radius: '10px', danger: '#ff5c5c', success: '#4caf7d',
+            shadow: '0 24px 64px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4)',
+            border: '2px solid rgba(255,255,255,0.09)', font: '',
+        },
+        blue: {
+            label: 'Light Blue',
             bg: 'rgba(18,18,22,0.94)', blur: 'blur(14px)',
             text: '#e2e2e6', textMuted: '#72728a',
             accent: '#7c6dfa', accentDim: 'rgba(124,109,250,0.45)',
@@ -111,7 +122,7 @@
             border: '1px solid rgba(255,255,255,0.09)', font: '',
         },
         deep: {
-            label: 'Deep Dark',
+            label: 'Deep Blue',
             bg: 'rgba(10,10,12,0.97)', blur: 'blur(0px)',
             text: '#c8c8d0', textMuted: '#505060',
             accent: '#8b7cf8', accentDim: 'rgba(139,124,248,0.4)',
@@ -122,19 +133,6 @@
             radius: '10px', danger: '#ff5c5c', success: '#4caf7d',
             shadow: '0 24px 64px rgba(0,0,0,0.8), 0 4px 16px rgba(0,0,0,0.6)',
             border: '1px solid rgba(255,255,255,0.06)', font: '',
-        },
-        darksky: {
-            label: 'Dark Sky',
-            bg: 'rgba(0,0,0,0.85)', blur: 'blur(14px)',
-            text: '#e2e2e6', textMuted: 'rgb(176,176,176)',
-            accent: 'rgb(191,191,191)', accentDim: 'rgba(209,209,209,0.4)',
-            accentBg: 'rgba(112,112,112,0.08)',
-            headerBg: 'rgba(255,255,255,0.04)', toolbarBg: 'rgba(0,0,0,0.25)',
-            msgUserBg: 'rgba(214,214,214,0.1)', msgAiBg: 'rgba(214,214,214,0.03)',
-            inputBg: 'rgba(0,0,0,0.30)', codeBg: 'rgba(0,0,0,0.35)',
-            radius: '10px', danger: '#ff5c5c', success: '#4caf7d',
-            shadow: '0 24px 64px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4)',
-            border: '2px solid rgba(255,255,255,0.09)', font: '',
         },
         glass: {
             label: 'Glass',
@@ -622,7 +620,7 @@
         return { bookName, data, origEntry };
     }
 
-    function logLBHistoryChanges(changes, statusStr) {
+    function logLBHistoryChanges(changes, statusStr, afterMsgId = null) {
         if (!changes || !changes.length) return;
         try {
             const session = getCurrentSession();
@@ -652,13 +650,15 @@
             } else {
                 const histText = `**System Notification** — User interaction with proposed lorebook changes:\n${newLines.join('\n')}`;
                 
-                const histMsg = addMessage(session, 'system', histText, { isLBHistory: true, appliedLines: [...newLines] });
-                appendLBHistoryEl(histMsg);
+                const histMsg = afterMsgId
+                    ? insertMessageAfter(session, afterMsgId, 'system', histText, { isLBHistory: true, appliedLines: [...newLines] })
+                    : addMessage(session, 'system', histText, { isLBHistory: true, appliedLines: [...newLines] });
+                appendLBHistoryEl(histMsg, afterMsgId);
             }
         } catch (_) {}
     }
 
-    async function applyLBChanges(changes) {
+    async function applyLBChanges(changes, afterMsgId = null) {
         console.log(`[${EXT_DISPLAY}] applyLBChanges: processing ${changes.length} change(s)`, JSON.parse(JSON.stringify(changes)));
         const bookCache = {};
         const successfulChanges =[];
@@ -735,7 +735,8 @@
         }
 
         if (successfulChanges.length > 0) {
-            logLBHistoryChanges(successfulChanges, 'Accepted');
+            recordStat(_SM.lb, successfulChanges.length);
+            logLBHistoryChanges(successfulChanges, 'Accepted', afterMsgId);
         }
     }
 
@@ -936,7 +937,7 @@
         modal.style.display = 'flex';
     }
 
-    function appendLBHistoryEl(msg) {
+    function appendLBHistoryEl(msg, afterMsgId = null) {
         const c = document.getElementById('scp-messages');
         if (!c) return;
         c.querySelector('.scp-empty-state')?.remove();
@@ -960,11 +961,28 @@
         meta.className = 'scp-msg-meta';
         meta.textContent = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-        body.appendChild(content); body.appendChild(meta);
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'scp-msg-btn scp-lb-history-close';
+        closeBtn.innerHTML = I.x;
+        closeBtn.title = 'Dismiss notification';
+        closeBtn.addEventListener('click', () => {
+            const session = getCurrentSession();
+            deleteMsg(session, msg.id);
+            wrap.remove();
+            updateMsgCount(session);
+        });
+
+        body.appendChild(content);
+        body.appendChild(closeBtn);
+        body.appendChild(meta);
         wrap.appendChild(avatar); wrap.appendChild(body);
-        c.appendChild(wrap);
+        const anchor = afterMsgId
+            ? (c.querySelector(`.scp-lb-proposal-card[data-for="${afterMsgId}"]`) || c.querySelector(`.scp-msg[data-id="${afterMsgId}"]`))
+            : null;
+        if (anchor) anchor.after(wrap);
+        else c.appendChild(wrap);
         updateMsgCount(getCurrentSession());
-        scrollToBottom();
+        if (!anchor) scrollToBottom();
     }
 
     // ─── Lorebook Manager UI ─────────────────────────────────────────────────────
@@ -973,139 +991,6 @@
     let _lbSearchQuery = '';
     let _lbEntryDetailEntry = null;
     let _lbEntryDetailBook = null;
-
-    function buildLorebookManagerHTML() {
-        return `
-<div id="scp-lb-overlay" class="scp-lb-overlay" style="display:none">
-    <div class="scp-lb-panel">
-        <div class="scp-lb-header">
-            <div class="scp-lb-header-left">
-                <span class="scp-lb-title-icon">${I.book}</span>
-                <span class="scp-lb-title">Lorebook Manager</span>
-            </div>
-            <div class="scp-lb-header-center">
-                <div class="scp-lb-search-wrap">
-                    ${I.search}
-                    <input type="text" id="scp-lb-search" class="scp-lb-search" placeholder="Search entries by name, keys, content…">
-                </div>
-            </div>
-            <div class="scp-lb-header-right">
-                <label class="scp-lb-toggle-wrap" title="Auto-inject entries whose keywords appear in main chat or Copilot">
-                    <span class="scp-lb-toggle-label">Auto-Keywords</span>
-                    <div class="scp-lb-toggle" id="scp-lb-auto-kw-toggle"><div class="scp-lb-toggle-knob"></div></div>
-                </label>
-                <label class="scp-lb-toggle-wrap" title="Allow AI to propose lorebook changes via chat">
-                    <span class="scp-lb-toggle-label">AI Edits</span>
-                    <div class="scp-lb-toggle" id="scp-lb-ai-toggle"><div class="scp-lb-toggle-knob"></div></div>
-                </label>
-                <button class="scp-hbtn scp-hbtn-close" id="scp-lb-close">${I.x}</button>
-            </div>
-        </div>
-
-        <div class="scp-lb-body">
-            <div class="scp-lb-sidebar">
-                <div class="scp-lb-sidebar-header">
-                    <span class="scp-lb-sidebar-title">Lorebooks</span>
-                    <button class="scp-tbtn" id="scp-lb-refresh" title="Refresh list">${I.refresh}</button>
-                </div>
-                <div class="scp-lb-book-list" id="scp-lb-book-list">
-                    <div class="scp-lb-loading">Loading\u2026</div>
-                </div>
-                <div class="scp-lb-sidebar-legend">
-                    <span class="scp-lb-legend-item"><span class="scp-lb-src-badge scp-lb-src-global">G</span> Global</span>
-                    <span class="scp-lb-legend-item"><span class="scp-lb-src-badge scp-lb-src-character">C</span> Char</span>
-                    <span class="scp-lb-legend-item"><span class="scp-lb-src-badge scp-lb-src-chat">Ch</span> Chat</span>
-                </div>
-            </div>
-
-            <div class="scp-lb-main">
-                <div class="scp-lb-main-toolbar">
-                    <span class="scp-lb-entries-label" id="scp-lb-entries-label">Select a lorebook</span>
-                    <div class="scp-lb-main-actions" id="scp-lb-main-actions" style="display:none">
-                        <button class="scp-lb-bulk-btn" id="scp-lb-enable-all">Force All On</button>
-                        <button class="scp-lb-bulk-btn" id="scp-lb-disable-all">Force All Off</button>
-                        <button class="scp-lb-bulk-btn" id="scp-lb-reset-overrides">Reset All</button>
-                        <button class="scp-lb-bulk-btn scp-lb-add-btn" id="scp-lb-add-entry">${I.plus} New Entry</button>
-                    </div>
-                </div>
-                <div class="scp-lb-ctx-legend" id="scp-lb-ctx-legend" style="display:none">
-                    <span class="scp-lb-ctx-legend-item"><span class="scp-lb-ind-demo scp-lb-ind-in-ctx"></span>In context</span>
-                    <span class="scp-lb-ctx-legend-item"><span class="scp-lb-ind-demo forced-on"></span>Force On</span>
-                    <span class="scp-lb-ctx-legend-item"><span class="scp-lb-ind-demo forced-off"></span>Force Off</span>
-                    <span class="scp-lb-ctx-legend-item"><span class="scp-lb-ind-demo scp-lb-ind-demo-disabled"></span>Disabled</span>
-                    <span class="scp-lb-ctx-legend-item"><span class="scp-lb-ind-demo"></span>Default</span>
-                </div>
-                <div class="scp-lb-entries-container">
-                    <div class="scp-lb-entries" id="scp-lb-entries">
-                        <div class="scp-lb-empty-state"><div class="scp-empty-icon">${I.book}</div><div>Select a lorebook to view its entries</div></div>
-                    </div>
-                    <div class="scp-lb-entry-detail" id="scp-lb-entry-detail" style="display:none">
-                        <div class="scp-lb-detail-header">
-                            <button class="scp-lb-back-btn" id="scp-lb-back">\u2190 Back</button>
-                            <span class="scp-lb-detail-title" id="scp-lb-detail-title">Entry</span>
-                            <div class="scp-lb-detail-actions">
-                                <button class="scp-lb-detail-btn" id="scp-lb-detail-copy" title="Copy content">${I.copy}</button>
-                                <button class="scp-lb-detail-btn scp-lb-detail-save-btn" id="scp-lb-detail-save" title="Save">${I.check} Save</button>
-                                <button class="scp-lb-detail-btn scp-lb-detail-danger" id="scp-lb-detail-delete" title="Delete entry">${I.trash}</button>
-                            </div>
-                        </div>
-                        <div class="scp-lb-detail-body">
-                            <div class="scp-lb-detail-row">
-                                <label class="scp-lb-detail-label">Name / Comment</label>
-                                <input type="text" class="scp-lb-detail-input" id="scp-lb-detail-name" placeholder="Entry name">
-                            </div>
-                            <div class="scp-lb-detail-row">
-                                <label class="scp-lb-detail-label">Trigger Keys <span class="scp-lb-label-hint">(comma-separated)</span></label>
-                                <input type="text" class="scp-lb-detail-input" id="scp-lb-detail-triggers" placeholder="keyword1, keyword2, /regex/i">
-                            </div>
-                            <div class="scp-lb-detail-row scp-lb-detail-row-grow">
-                                <label class="scp-lb-detail-label">Content</label>
-                                <textarea class="scp-lb-detail-textarea" id="scp-lb-detail-content" placeholder="Entry content\u2026"></textarea>
-                            </div>
-                            <div class="scp-lb-detail-meta-row">
-                                <div class="scp-lb-detail-meta-item">
-                                    <span class="scp-lb-detail-label">Lorebook Status</span>
-                                    <div class="scp-lb-detail-status" id="scp-lb-detail-lb-status" title="Click to toggle in lorebook">Enabled</div>
-                                </div>
-                                <div class="scp-lb-detail-meta-item">
-                                    <span class="scp-lb-detail-label">Copilot Context Injection</span>
-                                    <div style="display:flex;flex-direction:column;gap:4px">
-                                        <div class="scp-lb-detail-injection">
-                                            <button class="scp-lb-inj-btn" data-val="default" id="scp-lb-inj-default">Default</button>
-                                            <button class="scp-lb-inj-btn" data-val="true" id="scp-lb-inj-force-on">Force On</button>
-                                            <button class="scp-lb-inj-btn" data-val="false" id="scp-lb-inj-force-off">Force Off</button>
-                                        </div>
-                                        <span class="scp-lb-inj-hint" id="scp-lb-inj-hint"></span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="scp-lb-footer">
-            <span class="scp-lb-footer-info" id="scp-lb-footer-info"></span>
-            <span class="scp-lb-footer-ctx" id="scp-lb-footer-ctx"></span>
-        </div>
-    </div>
-</div>
-
-<div id="scp-diff-modal" class="scp-modal-overlay" style="display:none">
-    <div class="scp-modal scp-diff-modal-box">
-        <div class="scp-modal-header">
-            <span class="scp-diff-modal-title">${I.edit} Diff View</span>
-            <button class="scp-hbtn scp-hbtn-close" id="scp-diff-close">${I.x}</button>
-        </div>
-        <div class="scp-modal-tabs">
-            <button class="scp-modal-tab active" data-diff-tab="split">Split</button>
-            <button class="scp-modal-tab" data-diff-tab="unified">Unified</button>
-        </div>
-        <div class="scp-modal-body scp-diff-body" id="scp-diff-body"></div>
-    </div>
-</div>`;
-    }
     
     function renderProposalCard(changes, msgEl) {
         if (!changes?.length) return;
@@ -1168,7 +1053,7 @@
         dismissBtn.addEventListener('click', () => {
             const dismissedChanges = editableChanges.filter((_, i) => itemStates[i] === 'pending');
             if (dismissedChanges.length > 0) {
-                logLBHistoryChanges(dismissedChanges, 'Dismissed');
+                logLBHistoryChanges(dismissedChanges, 'Dismissed', card.dataset.for);
             }
             stripAndSave(); card.remove();
         });
@@ -1402,7 +1287,7 @@
                 closeEditPanel();
                 applyItemBtn.disabled = true; applyItemBtn.textContent = '…';
                 try {
-                    await applyLBChanges([editableChanges[ci]]);
+                    await applyLBChanges([editableChanges[ci]], card.dataset.for);
                     itemStates[ci] = 'applied';
                     item.classList.add('scp-lb-item-applied');
                     itemBtns.querySelectorAll('button').forEach(b => { b.disabled = true; });
@@ -1429,7 +1314,7 @@
                 item.classList.add('scp-lb-item-rejected');
                 itemBtns.querySelectorAll('button').forEach(b => { b.disabled = true; });
 
-                logLBHistoryChanges([editableChanges[ci]], 'Rejected');
+                logLBHistoryChanges([editableChanges[ci]], 'Rejected', card.dataset.for);
 
                 persistState();
                 updateCountBadge();
@@ -1457,6 +1342,7 @@
                     previewEl.style.cursor = 'pointer';
                     previewEl.addEventListener('click', e => {
                         e.stopPropagation();
+                        if (window.getSelection()?.toString()) return;
                         _expanded = !_expanded;
                         previewEl.textContent = _expanded ? c.content : c.content.slice(0, 120) + '…';
                         previewEl.style.whiteSpace = _expanded ? 'pre-wrap' : '';
@@ -1567,7 +1453,7 @@
             if (!pending.length) return;
             applyAllBtn.disabled = true; applyAllBtn.textContent = 'Applying…';
             try {
-                await applyLBChanges(pending);
+                await applyLBChanges(pending, card.dataset.for);
                 itemStates.forEach((s, i) => { if (s === 'pending') { itemStates[i] = 'applied'; itemEls[i].classList.add('scp-lb-item-applied'); itemEls[i].querySelectorAll('button').forEach(b => { b.disabled = true; }); } });
                 _wiCache = {};
                 persistState();
@@ -1589,7 +1475,7 @@
                 }
             });
             if (rejectedChanges.length > 0) {
-                logLBHistoryChanges(rejectedChanges, 'Rejected');
+                logLBHistoryChanges(rejectedChanges, 'Rejected', card.dataset.for);
             }
             persistState();
             updateCountBadge(); updateFooterBtns(); checkAllResolved();
@@ -1610,11 +1496,9 @@
         document.getElementById('scp-lb-ai-toggle')?.classList.toggle('active', !!s.lorebookAIManageEnabled);
         if (document.getElementById('scp-lb-search')) document.getElementById('scp-lb-search').value = _lbSearchQuery;
         _wiCache = {};
+        await buildLorebookContextBlock(s).catch(() => {});
         await refreshLorebookList().catch(e => console.error(`[${EXT_DISPLAY}] LB list:`, e));
         if (_lbActiveBook) await renderEntryList(_lbActiveBook, _lbSearchQuery).catch(() => {});
-        buildLorebookContextBlock(s).then(() => {
-            if (_lbActiveBook) renderEntryList(_lbActiveBook, _lbSearchQuery);
-        }).catch(() => {});
     }
 
     function closeLorebookManager() {
@@ -1779,8 +1663,9 @@
         if (!s.lorebookEntryOverrides) s.lorebookEntryOverrides = {};
         const key = `${bookName}_${entry.uid}`;
         const current = s.lorebookEntryOverrides[key];
+        const isConstantEntry = !!entry.constant && !entry.disable;
         let next;
-        if (current === undefined) next = true;
+        if (current === undefined) next = isConstantEntry ? false : true;
         else if (current === true) next = false;
         else { delete s.lorebookEntryOverrides[key]; next = undefined; }
         if (next !== undefined) s.lorebookEntryOverrides[key] = next;
@@ -1788,7 +1673,7 @@
 
         const ind = rowEl.querySelector('.scp-lb-entry-indicator');
         const btn = rowEl.querySelector('.scp-lb-entry-toggle-btn');
-        const isConstant = !!entry.constant && !entry.disable;
+        const isConstant = isConstantEntry;
 
         if (next === true) {
             ind.className = 'scp-lb-entry-indicator forced-on';
@@ -1854,7 +1739,7 @@
             if (override === true) hintEl.textContent = 'Always injected into Copilot context.';
             else if (override === false) hintEl.textContent = 'Never injected — excluded regardless of book selection.';
             else if (entry.constant && !entry.disable) hintEl.textContent = 'Constant entry. Automatically injected unless Forced Off.';
-            else if (isInCtx) hintEl.textContent = '✓ Was in last Copilot request context.';
+            else if (isInCtx) hintEl.textContent = '✓ In Copilot request context.';
             else if (isBookSel) hintEl.textContent = 'Included because this book is selected. Disable the entry or use Force Off to exclude.';
             else if (entry.disable) hintEl.textContent = 'Entry is disabled in lorebook. Enable it or use Force On to override.';
             else hintEl.textContent = 'Book not selected. Check the book checkbox in the sidebar, or use Force On.';
@@ -1938,6 +1823,8 @@
         const lbOverlay = document.getElementById('scp-lb-overlay');
         if (lbOverlay) {
             let _lbOverlayTouchStart = null;
+            let _lbMouseDownTarget = null;
+            lbOverlay.addEventListener('mousedown', e => { _lbMouseDownTarget = e.target; });
             lbOverlay.addEventListener('touchstart', e => {
                 if (e.target === lbOverlay) _lbOverlayTouchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
             }, { passive: true });
@@ -1950,13 +1837,16 @@
                 _lbOverlayTouchStart = null;
             }, { passive: true });
             lbOverlay.addEventListener('click', e => {
-                if (e.target === lbOverlay) closeLorebookManager();
+                if (e.target === lbOverlay && _lbMouseDownTarget === lbOverlay) closeLorebookManager();
+                _lbMouseDownTarget = null;
             });
         }
 
         const diffModal = document.getElementById('scp-diff-modal');
         document.getElementById('scp-diff-close')?.addEventListener('click', () => { if (diffModal) diffModal.style.display = 'none'; });
-        diffModal?.addEventListener('click', e => { if (e.target === diffModal) diffModal.style.display = 'none'; });
+        let _diffMouseDown = null;
+        diffModal?.addEventListener('mousedown', e => { _diffMouseDown = e.target; });
+        diffModal?.addEventListener('click', e => { if (e.target === diffModal && _diffMouseDown === diffModal) diffModal.style.display = 'none'; });
         document.getElementById('scp-lb-auto-kw-toggle')?.addEventListener('click', async () => {
             const s = getSettings(); 
             s.lorebookAutoKeyword = !s.lorebookAutoKeyword; 
@@ -2088,6 +1978,18 @@
             lorebookCopilotScanDepth: 6,
             floatingIconPersistent: false,
             reasoningTrimStrings: '',
+            ghostModeOpacity: 15,
+            ghostModeHotkey: 'Alt+Shift+G',
+            ghostModeHotkeyEnabled: true,
+            quickPromptsVisible: false,
+            quickPrompts: [
+                { id: 'qp_d1', label: 'Analyze', icon: '🔍', text: 'Analyze the current scene and character motivations in detail.' },
+                { id: 'qp_d2', label: 'Ideas', icon: '💡', text: 'Give me 3 creative plot twist ideas for the current scene.' },
+                { id: 'qp_d3', label: 'Summary', icon: '📋', text: 'Summarize everything that has happened in the roleplay so far.' },
+                { id: 'qp_d4', label: 'Feelings', icon: '💭', text: 'What is {{char}} likely feeling right now and why?' },
+                { id: 'qp_d5', label: 'Next?', icon: '🎯', text: 'What are the most interesting directions the story could go next?' },
+            ],
+            stats: { g:{}, c:{}, ch:{} },
         };
         for (const [k, v] of Object.entries(defaults)) {
             if (s[k] === undefined) s[k] = v;
@@ -2097,6 +1999,336 @@
 
     function saveSettings() {
         SillyTavern.getContext().saveSettingsDebounced();
+    }
+
+    // ─── Statistics Engine ───────────────────────────────────────────────────────
+
+    // Metric index map
+    const _SM = { msg:0, regen:1, sess:2, tokIn:3, tokOut:4, qp:5, lb:6, edit:7 };
+    const _STAT_N = 8;
+    const _STAT_META = [
+        { key:'msg',   label:'Messages',    icon:'💬', color:'#7c6dfa' },
+        { key:'regen', label:'Regens',      icon:'🔄', color:'#4caf7d' },
+        { key:'sess',  label:'Sessions',    icon:'📂', color:'#ffb432' },
+        { key:'tokIn', label:'Tokens In',   icon:'📥', color:'#5bc0eb' },
+        { key:'tokOut',label:'Tokens Out',  icon:'📤', color:'#f06292' },
+        { key:'qp',    label:'QPrompts',    icon:'⚡', color:'#ff8a65' },
+        { key:'lb',    label:'LB Changes',  icon:'📖', color:'#ab47bc' },
+        { key:'edit',  label:'Edits',       icon:'✏️', color:'#78909c' },
+    ];
+
+    function _ensureStats() {
+        const s = getSettings();
+        if (!s.stats) s.stats = { g:{}, c:{}, ch:{} };
+        if (!s.stats.g) s.stats.g = {};
+        if (!s.stats.c) s.stats.c = {};
+        if (!s.stats.ch) s.stats.ch = {};
+        return s.stats;
+    }
+
+    function _statDateKey() {
+        const d = new Date();
+        return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+    }
+
+    function _toDateKey(d) {
+        return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+    }
+
+    function recordStat(metricIdx, value = 1) {
+        try {
+            if (metricIdx < 0 || metricIdx >= _STAT_N || !value) return;
+            const st = _ensureStats();
+            const dk = _statDateKey();
+            const { charId, chatId } = getBindingKey();
+            const chk = `${charId}\x1f${chatId}`;
+            const inc = obj => {
+                if (!obj[dk]) obj[dk] = [0,0,0,0,0,0,0,0];
+                obj[dk][metricIdx] = (obj[dk][metricIdx] || 0) + value;
+            };
+            inc(st.g);
+            if (!st.c[charId]) st.c[charId] = {};
+            inc(st.c[charId]);
+            if (!st.ch[chk]) st.ch[chk] = {};
+            inc(st.ch[chk]);
+            saveSettings();
+        } catch(_) {}
+    }
+
+    function _statGetObj(scope) {
+        const st = _ensureStats();
+        const { charId, chatId } = getBindingKey();
+        if (scope === 'g') return st.g;
+        if (scope === 'ch') return st.ch[`${charId}\x1f${chatId}`] || {};
+        return st.c[charId] || {};
+    }
+
+    function getStatBuckets(scope, period) {
+        const obj = _statGetObj(scope);
+        const now = new Date();
+        const EMPTY = () => new Array(_STAT_N).fill(0);
+        const results = [];
+
+        if (period === 'day') {
+            for (let i = 29; i >= 0; i--) {
+                const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+                const v = obj[_toDateKey(d)];
+                const vals = v ? v.slice() : EMPTY();
+                while (vals.length < _STAT_N) vals.push(0);
+                const lbl = i === 0 ? 'Today' : `${d.getMonth()+1}/${d.getDate()}`;
+                results.push({ label: lbl, vals });
+            }
+        } else if (period === 'week') {
+            for (let w = 11; w >= 0; w--) {
+                const wEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - w * 7);
+                const wStart = new Date(wEnd.getFullYear(), wEnd.getMonth(), wEnd.getDate() - 6);
+                const agg = EMPTY();
+                for (let d = 0; d <= 6; d++) {
+                    const day = new Date(wStart.getFullYear(), wStart.getMonth(), wStart.getDate() + d);
+                    const v = obj[_toDateKey(day)];
+                    if (v) v.forEach((n, i) => { if (i < _STAT_N) agg[i] += (n || 0); });
+                }
+                results.push({ label: w === 0 ? 'This wk' : `${wStart.getMonth()+1}/${wStart.getDate()}`, vals: agg });
+            }
+        } else if (period === 'month') {
+            for (let m = 11; m >= 0; m--) {
+                const d = new Date(now.getFullYear(), now.getMonth() - m, 1);
+                const y = d.getFullYear(), mo = d.getMonth();
+                const agg = EMPTY();
+                const days = new Date(y, mo + 1, 0).getDate();
+                for (let day = 1; day <= days; day++) {
+                    const key = `${y}${String(mo+1).padStart(2,'0')}${String(day).padStart(2,'0')}`;
+                    const v = obj[key];
+                    if (v) v.forEach((n, i) => { if (i < _STAT_N) agg[i] += (n || 0); });
+                }
+                results.push({ label: d.toLocaleString('default', { month: 'short', year: m > 0 ? '2-digit' : undefined }), vals: agg });
+            }
+        } else {
+            const allKeys = Object.keys(obj);
+            const yearsSet = new Set(allKeys.map(k => k.slice(0,4)));
+            yearsSet.add(String(now.getFullYear()));
+            const years = [...yearsSet].sort();
+            for (const y of years) {
+                const agg = EMPTY();
+                allKeys.forEach(k => {
+                    if (k.startsWith(y)) {
+                        const v = obj[k];
+                        if (v) v.forEach((n, i) => { if (i < _STAT_N) agg[i] += (n || 0); });
+                    }
+                });
+                results.push({ label: y, vals: agg });
+            }
+            if (!results.length) results.push({ label: String(now.getFullYear()), vals: EMPTY() });
+        }
+        return results;
+    }
+
+    function getStatTotals(scope) {
+        const obj = _statGetObj(scope);
+        const totals = new Array(_STAT_N).fill(0);
+        Object.values(obj).forEach(v => {
+            if (Array.isArray(v)) v.forEach((n, i) => { if (i < _STAT_N) totals[i] += (n || 0); });
+        });
+        return totals;
+    }
+
+    function _fmtNum(n) {
+        if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+        return String(n);
+    }
+
+    let _statsState = { scope: 'g', period: 'day', metric: 0 };
+
+    function renderStatsPane(container) {
+        if (!container) return;
+        container.innerHTML = '';
+
+        const s = _statsState;
+
+        const controls = document.createElement('div');
+        controls.className = 'scp-stats-controls';
+
+        const mkPillRow = (label, items, stateKey, onSelect) => {
+            const row = document.createElement('div');
+            row.className = 'scp-stats-pill-row';
+            const lbl = document.createElement('span');
+            lbl.className = 'scp-stats-pill-label';
+            lbl.textContent = label;
+            row.appendChild(lbl);
+            items.forEach(([val, txt]) => {
+                const btn = document.createElement('button');
+                btn.className = `scp-stats-pill${s[stateKey] === val ? ' active' : ''}`;
+                btn.textContent = txt;
+                btn.dataset[stateKey] = val;
+                btn.addEventListener('click', () => {
+                    if (_statsState[stateKey] === val) return;
+                    _statsState[stateKey] = val;
+                    container.querySelectorAll(`[data-${stateKey}]`).forEach(b => b.classList.toggle('active', b.dataset[stateKey] === val));
+                    onSelect(val);
+                });
+                row.appendChild(btn);
+            });
+            return row;
+        };
+
+        controls.appendChild(mkPillRow('Scope',
+            [['g','Global'],['c','Character'],['ch','Chat']],
+            'scope',
+            () => { refreshStatCards(container); refreshStatsChart(container); }
+        ));
+        controls.appendChild(mkPillRow('Period',
+            [['day','30 Days'],['week','12 Weeks'],['month','12 Mo'],['year','All Years']],
+            'period',
+            () => refreshStatsChart(container)
+        ));
+        container.appendChild(controls);
+
+        const cardsWrap = document.createElement('div');
+        cardsWrap.className = 'scp-stats-cards';
+        cardsWrap.id = 'scp-stats-cards';
+        container.appendChild(cardsWrap);
+
+        const chartWrap = document.createElement('div');
+        chartWrap.className = 'scp-stats-chart-wrap';
+        chartWrap.id = 'scp-stats-chart-wrap';
+        container.appendChild(chartWrap);
+
+        const danger = document.createElement('div');
+        danger.className = 'scp-sp-group scp-stats-danger';
+        danger.innerHTML = `<div class="scp-sp-group-title" style="color:var(--scp-danger)"><i class="fa-solid fa-triangle-exclamation"></i> Danger Zone</div>`;
+        const resetBtn = document.createElement('button');
+        resetBtn.className = 'scp-action-btn scp-sp-danger-btn';
+        resetBtn.innerHTML = '<i class="fa-solid fa-trash"></i><span>Reset Statistics</span>';
+        resetBtn.addEventListener('click', async () => {
+            const ok = await showCustomDialog({ type:'confirm', title:'Reset Statistics', message:'Delete ALL collected statistics permanently? This cannot be undone.', delayConfirm:3 });
+            if (!ok) return;
+            getSettings().stats = { g:{}, c:{}, ch:{} };
+            saveSettings();
+            renderStatsPane(container);
+            toastr.success('Statistics cleared.', EXT_DISPLAY);
+        });
+        danger.appendChild(resetBtn);
+        container.appendChild(danger);
+
+        refreshStatCards(container);
+        refreshStatsChart(container);
+    }
+
+    function refreshStatCards(container) {
+        const wrap = container.querySelector('#scp-stats-cards');
+        if (!wrap) return;
+        const totals = getStatTotals(_statsState.scope);
+        wrap.innerHTML = '';
+        _STAT_META.forEach((meta, idx) => {
+            const card = document.createElement('div');
+            card.className = `scp-stats-card${_statsState.metric === idx ? ' active' : ''}`;
+            card.style.setProperty('--scp-stat-color', meta.color);
+            card.innerHTML = `<span class="scp-stats-card-icon">${meta.icon}</span><span class="scp-stats-card-val">${_fmtNum(totals[idx])}</span><span class="scp-stats-card-label">${meta.label}</span>`;
+            card.addEventListener('click', () => {
+                _statsState.metric = idx;
+                container.querySelectorAll('.scp-stats-card').forEach((c, i) => c.classList.toggle('active', i === idx));
+                refreshStatsChart(container);
+            });
+            wrap.appendChild(card);
+        });
+    }
+
+    function refreshStatsChart(container) {
+        const wrap = container.querySelector('#scp-stats-chart-wrap');
+        if (!wrap) return;
+        const buckets = getStatBuckets(_statsState.scope, _statsState.period);
+        renderSVGChart(wrap, buckets, _statsState.metric, _STAT_META[_statsState.metric]);
+    }
+
+    function renderSVGChart(container, buckets, metricIdx, meta) {
+        const W = 580, H = 170, PL = 38, PR = 12, PT = 14, PB = 30;
+        const cW = W - PL - PR, cH = H - PT - PB;
+        const vals = buckets.map(b => b.vals[metricIdx] || 0);
+        const maxVal = Math.max(...vals, 1);
+
+        const px = i => PL + (buckets.length < 2 ? cW / 2 : i / (buckets.length - 1) * cW);
+        const py = v => PT + cH - (v / maxVal) * cH;
+
+        const points = buckets.map((_, i) => [px(i), py(vals[i])]);
+        const linePath = points.map((p, i) => `${i===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+        const areaPath = linePath + ` L${points[points.length-1][0].toFixed(1)},${(PT+cH).toFixed(1)} L${PL},${(PT+cH).toFixed(1)} Z`;
+
+        const yTicks = [0, 0.5, 1].map(f => ({ y: py(maxVal*f), lbl: _fmtNum(Math.round(maxVal*f)) }));
+        const xStep = Math.max(1, Math.ceil(buckets.length / 9));
+        const gradId = `scpsg${metricIdx}`;
+
+        const xLabels = buckets.map((b, i) => {
+            if (i % xStep !== 0 && i !== buckets.length - 1) return '';
+            return `<text x="${px(i).toFixed(1)}" y="${H-3}" text-anchor="middle" class="scp-stats-axis-label">${escHtml(b.label)}</text>`;
+        }).join('');
+
+        const dots = points.map((p, i) => vals[i] > 0
+            ? `<circle class="scp-stats-dot" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3" fill="${meta.color}" data-i="${i}"/>`
+            : '').join('');
+
+        const hoverCols = buckets.map((b, i) => {
+            const colW = cW / Math.max(buckets.length, 1);
+            const x = px(i) - colW / 2;
+            return `<rect class="scp-stats-hcol" x="${x.toFixed(1)}" y="${PT}" width="${colW.toFixed(1)}" height="${cH}" fill="transparent" data-i="${i}" data-v="${vals[i]}" data-l="${escHtml(b.label)}"/>`;
+        }).join('');
+
+        container.innerHTML = `
+<div class="scp-stats-chart-inner">
+  <svg class="scp-stats-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${meta.color}" stop-opacity="0.22"/>
+        <stop offset="100%" stop-color="${meta.color}" stop-opacity="0.01"/>
+      </linearGradient>
+    </defs>
+    ${yTicks.map(t => `<line x1="${PL}" y1="${t.y.toFixed(1)}" x2="${W-PR}" y2="${t.y.toFixed(1)}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/><text x="${PL-4}" y="${(t.y+4).toFixed(1)}" text-anchor="end" class="scp-stats-axis-label">${t.lbl}</text>`).join('')}
+    <path d="${areaPath}" fill="url(#${gradId})"/>
+    <path d="${linePath}" fill="none" stroke="${meta.color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    ${dots}
+    ${xLabels}
+    ${hoverCols}
+  </svg>
+  <div class="scp-stats-tooltip" id="scp-stats-tt" style="display:none"></div>
+</div>`;
+
+        const svgEl = container.querySelector('.scp-stats-svg');
+        const tt = container.querySelector('#scp-stats-tt');
+        if (!svgEl || !tt) return;
+
+        let _lastI = -1;
+        svgEl.addEventListener('pointermove', e => {
+            const r = svgEl.getBoundingClientRect();
+            const svgX = (e.clientX - r.left) / r.width * W;
+            const relX = svgX - PL;
+            const rawIdx = relX / cW * (buckets.length - 1);
+            const idx = Math.max(0, Math.min(buckets.length - 1, Math.round(rawIdx)));
+            if (idx === _lastI) return;
+            _lastI = idx;
+            const val = vals[idx];
+            tt.style.display = '';
+            tt.innerHTML = `<span class="scp-stats-tt-label">${escHtml(buckets[idx].label)}</span><span class="scp-stats-tt-val" style="color:${meta.color}">${_fmtNum(val)}</span>`;
+            const dotPxX = px(idx) / W * r.width;
+            const dotPxY = py(val) / H * r.height;
+            const ttW = 90;
+            let left = dotPxX - ttW / 2;
+            left = Math.max(0, Math.min(left, r.width - ttW));
+            tt.style.left = `${left}px`;
+            tt.style.top = `${Math.max(0, dotPxY - 42)}px`;
+            svgEl.querySelectorAll('.scp-stats-dot').forEach((d, i) => d.setAttribute('r', i === idx ? '4.5' : '3'));
+        });
+        svgEl.addEventListener('pointerleave', () => {
+            tt.style.display = 'none';
+            _lastI = -1;
+            svgEl.querySelectorAll('.scp-stats-dot').forEach(d => d.setAttribute('r', '3'));
+        });
+
+        if ('ontouchstart' in window || window.innerWidth <= 900) {
+            requestAnimationFrame(() => {
+                const inner = container.querySelector('.scp-stats-chart-inner');
+                if (inner) inner.scrollLeft = inner.scrollWidth;
+            });
+        }
     }
 
     // ─── Session Override System ─────────────────────────────────────────────────
@@ -2158,6 +2390,13 @@
             const count = Object.keys(ov).length;
             info.textContent = count ? `${count} session override${count !== 1 ? 's' : ''} active` : '';
         }
+        // Dim the main depth slider when session override is active for contextDepth
+        const ov = getSessionOverrides();
+        const depthSlider = document.getElementById('scp-depth-slider');
+        const depthVal = document.getElementById('scp-depth-val');
+        const hasDepthOv = 'contextDepth' in ov;
+        if (depthSlider) depthSlider.classList.toggle('scp-slider-overridden', hasDepthOv);
+        if (depthVal) depthVal.classList.toggle('scp-depth-val-overridden', hasDepthOv);
     }
 
     function updateSPOverrideIndicators() {
@@ -2215,6 +2454,13 @@
         const parsed = _parseRgba(initialVal);
         const hexVal = parsed ? _rgbToHex(parsed.r, parsed.g, parsed.b) : '#7c6dfa';
         const alphaVal = parsed ? Math.round(parsed.a * 100) : 100;
+
+        // Temporarily hide settings overlay so user can see the copilot window
+        const settingsOverlay = anchorEl.closest('#scp-settings-overlay');
+        if (settingsOverlay) {
+            settingsOverlay.style.opacity = '0';
+            settingsOverlay.style.pointerEvents = 'none';
+        }
 
         const pop = document.createElement('div');
         pop.className = 'scp-color-pop';
@@ -2277,6 +2523,10 @@
         const onOutside = e => {
             if (!pop.contains(e.target) && e.target !== anchorEl) {
                 pop.remove(); _activeColorPop = null;
+                if (settingsOverlay) {
+                    settingsOverlay.style.opacity = '';
+                    settingsOverlay.style.pointerEvents = '';
+                }
                 document.removeEventListener('mousedown', onOutside, true);
             }
         };
@@ -2340,7 +2590,9 @@
             
             okBtn.addEventListener('click', () => { if (!okBtn.disabled) close(isPrompt ? input.value : true); });
             cancelBtn?.addEventListener('click', () => close(isPrompt ? null : false));
-            overlay.addEventListener('click', e => { if (e.target === overlay) close(isPrompt ? null : false); });
+            let _dlgMouseDownTarget = null;
+            overlay.addEventListener('mousedown', e => { _dlgMouseDownTarget = e.target; });
+            overlay.addEventListener('click', e => { if (e.target === overlay && _dlgMouseDownTarget === overlay) close(isPrompt ? null : false); });
             const keyHandler = e => {
                 if (e.key === 'Enter') { e.preventDefault(); if (!okBtn.disabled) close(isPrompt ? input.value : true); }
                 if (e.key === 'Escape') close(isPrompt ? null : false);
@@ -2350,7 +2602,49 @@
         });
     }
 
-    // ─── Session & Binding ──────────────────────────────────────────────────────
+    // ─── Session Dialog (with temporary toggle) ──────────────────────────────────
+
+    function showSessionDialog({ defaultName = '' } = {}) {
+        return new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.className = 'scp-dialog-overlay';
+            overlay.innerHTML = `
+                <div class="scp-dialog-box">
+                    <div class="scp-dialog-title">New Session</div>
+                    <div class="scp-dialog-msg">Session name:</div>
+                    <input type="text" class="scp-dialog-input" value="${escHtml(defaultName)}" placeholder="${escHtml(defaultName)}">
+                    <label class="scp-sess-tmp-label">
+                        <div class="scp-lb-toggle" id="scp-sess-tmp-toggle"><div class="scp-lb-toggle-knob"></div></div>
+                        <span>Temporary — auto-delete when switching</span>
+                    </label>
+                    <div class="scp-dialog-btns">
+                        <button class="scp-dialog-btn scp-dialog-cancel">Cancel</button>
+                        <button class="scp-dialog-btn scp-dialog-ok">Create</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+            let isTemporary = false;
+            const toggle = overlay.querySelector('#scp-sess-tmp-toggle');
+            toggle.addEventListener('click', () => {
+                isTemporary = !isTemporary;
+                toggle.classList.toggle('active', isTemporary);
+            });
+            const input = overlay.querySelector('.scp-dialog-input');
+            const okBtn = overlay.querySelector('.scp-dialog-ok');
+            const cancelBtn = overlay.querySelector('.scp-dialog-cancel');
+            const close = val => { overlay.classList.remove('visible'); setTimeout(() => overlay.remove(), 150); resolve(val); };
+            input.focus(); input.select();
+            okBtn.addEventListener('click', () => close({ name: input.value, isTemporary }));
+            cancelBtn.addEventListener('click', () => close(null));
+            overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { e.preventDefault(); close({ name: input.value, isTemporary }); }
+                if (e.key === 'Escape') close(null);
+            });
+            requestAnimationFrame(() => overlay.classList.add('visible'));
+        });
+    }
+
 
     function getBindingKey() {
         const ctx = SillyTavern.getContext();
@@ -2377,12 +2671,19 @@
 
     function genId(prefix) { return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`; }
 
-    function createSession(charId, chatId, name) {
+    function createSession(charId, chatId, name, isTemporary = false) {
         const bucket = getChatBucket(charId, chatId);
         const id = genId('sess');
-        const sess = { id, name: name || `Session ${bucket.sessions.length + 1}`, created: Date.now(), messages: [] };
+        const sess = { id, name: name || `Session ${bucket.sessions.length + 1}`, created: Date.now(), messages: [], isTemporary };
+        
+        const prev = bucket.sessions.find(s => s.id === bucket.activeSessionId);
+        if (prev && prev.isTemporary) {
+            bucket.sessions = bucket.sessions.filter(s => s.id !== prev.id);
+        }
+
         bucket.sessions.push(sess);
         bucket.activeSessionId = id;
+        recordStat(_SM.sess);
         saveSettings();
         return sess;
     }
@@ -2395,7 +2696,13 @@
 
     function setActiveSession(charId, chatId, sessionId) {
         const bucket = getChatBucket(charId, chatId);
-        if (bucket.sessions.find(s => s.id === sessionId)) { bucket.activeSessionId = sessionId; saveSettings(); }
+        if (!bucket.sessions.find(s => s.id === sessionId)) return;
+        const prev = bucket.sessions.find(s => s.id === bucket.activeSessionId);
+        if (prev && prev.isTemporary && prev.id !== sessionId) {
+            bucket.sessions = bucket.sessions.filter(s => s.id !== prev.id);
+        }
+        bucket.activeSessionId = sessionId;
+        saveSettings();
     }
 
     function deleteCurrentSession(charId, chatId) {
@@ -2410,6 +2717,14 @@
     function addMessage(session, role, content, extra = {}) {
         const msg = { id: genId('msg'), role, content, timestamp: Date.now(), ...extra };
         session.messages.push(msg); saveSettings(); return msg;
+    }
+    function insertMessageAfter(session, afterMsgId, role, content, extra = {}) {
+        const msg = { id: genId('msg'), role, content, timestamp: Date.now(), ...extra };
+        const idx = afterMsgId ? session.messages.findIndex(m => m.id === afterMsgId) : -1;
+        if (idx !== -1) session.messages.splice(idx + 1, 0, msg);
+        else session.messages.push(msg);
+        saveSettings();
+        return msg;
     }
     function updateMessage(session, msgId, newContent) {
         const msg = session.messages.find(m => m.id === msgId);
@@ -2434,13 +2749,31 @@
         const ctx = SillyTavern.getContext();
         const char = ctx.characters?.[ctx.characterId];
         if (!char) return null;
+        
+        const d = char.data || {};
+        const ov = ctx.chatMetadata?.character_overrides || {};
+        
+        const get = (field, macro) => {
+            if (ov[field]) return ov[field];
+            if (macro) {
+                try { const r = expandMacros(macro); if (r && r !== macro) return r; } catch(_) {}
+            }
+            return d[field] || char[field] || '';
+        };
+
+        const getCharNote = () => {
+            if (ov.depth_prompt && ov.depth_prompt.prompt) return ov.depth_prompt.prompt;
+            return d.extensions?.depth_prompt?.prompt || char.extensions?.depth_prompt?.prompt || '';
+        };
+
         return {
             name: char.name || 'Unknown',
-            description: char.description || '',
-            personality: char.personality || '',
-            scenario: char.scenario || '',
-            mes_example: char.mes_example || '',
-            system_prompt: char.system_prompt || '',
+            description: get('description', '{{description}}'),
+            personality: get('personality', '{{personality}}'),
+            scenario: get('scenario', '{{scenario}}'),
+            mes_example: get('mes_example', '{{mesExamples}}'),
+            character_note: getCharNote(),
+            creator_notes: get('creator_notes'),
         };
     }
 
@@ -2557,6 +2890,7 @@
         try {
             const ctx = SillyTavern.getContext();
             const char = ctx.characters?.[ctx.characterId];
+            const d = char?.data || {};
             const now = new Date();
             return text
                 .replace(/\{\{user\}\}/gi, ctx.name1 || 'User')
@@ -2585,9 +2919,9 @@
                     }
                     return '';
                 })
-                .replace(/\{\{description\}\}/gi, char?.description || '')
-                .replace(/\{\{personality\}\}/gi, char?.personality || '')
-                .replace(/\{\{scenario\}\}/gi, char?.scenario || '');
+                .replace(/\{\{description\}\}/gi, d.description || char?.description || '')
+                .replace(/\{\{personality\}\}/gi, d.personality || char?.personality || '')
+                .replace(/\{\{scenario\}\}/gi, d.scenario || char?.scenario || '');
         } catch (_) {
             return text;
         }
@@ -2600,11 +2934,33 @@
 
     function getMainChatSlice(depth) {
         const ctx = SillyTavern.getContext();
-        if (!ctx.chat || depth === 0) return [];
-        return ctx.chat.slice(-depth).map(m => ({
+        if (!ctx.chat) return [];
+        try {
+            const sess = getCurrentSession();
+            const picked = sess.pickedChatIndices;
+            if (picked && picked.length > 0) {
+                const charInfo = getCharInfo();
+                return picked
+                    .filter(i => i >= 0 && i < ctx.chat.length)
+                    .map(i => {
+                        const m = ctx.chat[i];
+                        return {
+                            role: m.is_user ? 'user' : 'assistant',
+                            name: m.is_user ? (ctx.name1 || 'User') : (m.name || charInfo?.name || 'Character'),
+                            content: typeof m.mes === 'string' ? m.mes : '',
+                            chatIndex: i,
+                        };
+                    })
+                    .filter(Boolean);
+            }
+        } catch(_) {}
+        if (depth === 0) return [];
+        const total = ctx.chat.length;
+        return ctx.chat.slice(-depth).map((m, i) => ({
             role: m.is_user ? 'user' : 'assistant',
             name: m.is_user ? (ctx.name1 || 'User') : (m.name || getCharInfo()?.name || 'Character'),
             content: typeof m.mes === 'string' ? m.mes : '',
+            chatIndex: total - depth + i,
         }));
     }
 
@@ -2627,7 +2983,10 @@
             if (charInfo.description) block += `\nDescription:\n${charInfo.description}`;
             if (charInfo.personality) block += `\nPersonality:\n${charInfo.personality}`;
             if (charInfo.scenario) block += `\nScenario:\n${charInfo.scenario}`;
-            if (charInfo.system_prompt) block += `\nCharacter System Note:\n${charInfo.system_prompt}`;
+            
+            if (charInfo.character_note) block += `\nCharacter's Note:\n${charInfo.character_note}`;
+            
+            if (charInfo.mes_example) block += `\nExamples of dialogue:\n${charInfo.mes_example}`;
             parts.push(`\n\n<character_information>\n${block}\n</character_information>`);
         }
 
@@ -2650,13 +3009,17 @@
     async function assembleMessages(session, settings, pendingUserText) {
         const messages = [{ role: 'system', content: await buildSystemContent(settings) }];
         const depth = Math.max(0, parseInt(settings.contextDepth) || 0);
-        if (depth > 0) {
+        const hasPicked = !!(session.pickedChatIndices && session.pickedChatIndices.length > 0);
+        if (depth > 0 || hasPicked) {
             const slice = getMainChatSlice(depth);
             if (slice.length) {
-                const block = slice.map(m => `[${m.name}]: ${m.content}`).join('\n\n');
+                const block = hasPicked
+                    ? slice.map(m => `[msg #${m.chatIndex + 1}][${m.name}]: ${m.content}`).join('\n\n')
+                    : slice.map(m => `[${m.name}]: ${m.content}`).join('\n\n');
+                const ctxAttr = hasPicked ? `picked_messages="${slice.length}"` : `last_messages="${slice.length}"`;
                 messages.push({
                     role: 'user',
-                    content: `<roleplay_context last_messages="${slice.length}">\n\n${block}\n\n</roleplay_context>`,
+                    content: `<roleplay_context ${ctxAttr}>\n\n${block}\n\n</roleplay_context>`,
                 });
                 messages.push({ role: 'assistant', content: 'Understood. I have reviewed the current roleplay context. How can I help?' });
             }
@@ -2707,6 +3070,9 @@
     // ─── API Generation ─────────────────────────────────────────────────────────
 
     let _abortController = null;
+
+    const _htmlBlockRegistry = new Map();
+    let _htmlBlockCounter = 0;
 
     async function doCallGenerate(session, settings, pendingText) {
         if (_abortController) _abortController.abort();
@@ -2775,377 +3141,402 @@
         check: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
         chevron: `<svg class="scp-sess-chevron" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>`,
         gear: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
+        ghost: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10h.01M15 10h.01M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></svg>`,
+        lightning: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+        pick: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="9" y1="10" x2="9" y2="10" stroke-width="3" stroke-linecap="round"/><line x1="12" y1="10" x2="12" y2="10" stroke-width="3" stroke-linecap="round"/><line x1="15" y1="10" x2="15" y2="10" stroke-width="3" stroke-linecap="round"/></svg>`,
     };
 
-    // ─── Settings Overlay ────────────────────────────────────────────────────────
+    // ─── Quick Prompts ───────────────────────────────────────────────────────────
 
-    function buildSettingsOverlayHTML() {
-        return `
-<div id="scp-settings-overlay" class="scp-settings-overlay" style="display:none">
-  <div class="scp-settings-panel">
+    const QP_ICON_POOL = [
+        '🔍','💡','📋','✨','🎭','📖','🗺️','⚔️','🧠','💬',
+        '🎯','🔮','📝','🌍','❓','🎨','💭','🔥','⚡','🎲',
+        '👁️','🧩','📚','🗣️','💫','🌟','🎬','🧪','🏆','🎵',
+        '🌙','☀️','🌊','🍃','💎','🛡️','🗡️','🏰','🐉','🦋',
+        '🎪','🌀','🔑','💀','🌹','🍷','🎩','🧿','🔔','⭐',
+        '🐺','🦊','🐦','🌸','🍄','🔴','🟣','🔵','🟡','🟢',
+    ];
 
-    <div class="scp-sp-header">
-      <div class="scp-sp-header-left">
-        <span style="color:var(--scp-accent);display:flex">${I.gear}</span>
-        <span class="scp-sp-title">ST-Copilot Settings</span>
-      </div>
-      <div class="scp-sp-tabs">
-        <button class="scp-sp-tab active" data-sptab="global">Global</button>
-        <button class="scp-sp-tab" data-sptab="session">
-          Session
-          <span class="scp-sp-override-dot" id="scp-sp-override-dot" style="display:none" title="Session overrides active"></span>
-        </button>
-      </div>
-      <button class="scp-hbtn scp-hbtn-close" id="scp-sp-close">${I.x}</button>
-    </div>
+    function renderQuickPromptsBar() {
+        const bar = document.getElementById('scp-qp-bar');
+        const toggleBtn = document.getElementById('scp-qp-toggle-btn');
+        if (!bar) return;
+        const s = getSettings();
+        const prompts = s.quickPrompts || [];
+        const visible = s.quickPromptsVisible && prompts.length > 0;
 
-    <div class="scp-sp-body">
+        bar.innerHTML = '';
+        for (const qp of prompts) {
+            const btn = document.createElement('button');
+            btn.className = 'scp-qp-chip';
+            const truncTitle = qp.text.length > 100 ? qp.text.slice(0, 100) + '…' : qp.text;
+            btn.title = truncTitle;
+            btn.innerHTML = `<span class="scp-qp-icon">${escHtml(qp.icon || '⚡')}</span><span class="scp-qp-label">${escHtml(qp.label || '')}</span>`;
+            btn.addEventListener('click', () => {
+                const input = document.getElementById('scp-input');
+                if (!input) return;
+                input.value = qp.text;
+                autoResize(input);
+                input.focus();
+                recordStat(_SM.qp);
+            });
+            bar.appendChild(btn);
+        }
 
-      <!-- ══ GLOBAL TAB ══ -->
-      <div class="scp-sp-tab-pane" id="scp-sp-pane-global">
-
-        <div class="scp-sp-group">
-          <div class="scp-sp-group-title"><i class="fa-solid fa-sliders"></i> General</div>
-          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-enabled"><span>Enable ST-Copilot</span></label>
-          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-icon-persistent"><span>Always show floating icon</span></label>
-          <div class="scp-sp-row" style="gap:8px;margin-top:6px">
-            <label class="scp-sp-check" style="flex:0 0 auto"><input type="checkbox" id="scp-sp-hotkey-enabled"><span>Shortcut</span></label>
-            <input type="text" class="scp-sp-input" id="scp-sp-hotkey" placeholder="Alt+Shift+C" style="flex:1">
-          </div>
-        </div>
-
-        <div class="scp-sp-group">
-          <div class="scp-sp-group-title"><i class="fa-solid fa-bookmark"></i> Configuration Profiles</div>
-          <div class="scp-profile-bar">
-            <select id="scp-sp-profile-select"></select>
-            <button class="scp-profile-icon-btn" id="scp-sp-profile-save" title="Save to profile"><i class="fa-solid fa-floppy-disk"></i></button>
-            <button class="scp-profile-icon-btn" id="scp-sp-profile-create" title="New profile"><i class="fa-solid fa-plus"></i></button>
-            <button class="scp-profile-icon-btn" id="scp-sp-profile-rename" title="Rename"><i class="fa-solid fa-pen"></i></button>
-            <button class="scp-profile-icon-btn danger" id="scp-sp-profile-delete" title="Delete"><i class="fa-solid fa-trash"></i></button>
-          </div>
-          <div class="scp-binding-row" id="scp-sp-binding-section" style="display:none">
-            <span class="scp-binding-label">Auto-load for:</span>
-            <button class="scp-bind-btn" id="scp-sp-bind-char"><i class="fa-solid fa-user"></i> Character</button>
-            <button class="scp-bind-btn" id="scp-sp-bind-chat"><i class="fa-solid fa-comments"></i> Chat</button>
-          </div>
-        </div>
-
-        <div class="scp-sp-group">
-          <div class="scp-sp-group-title"><i class="fa-solid fa-plug"></i> Connection</div>
-          <select class="scp-sp-select" id="scp-sp-conn-source">
-            <option value="default">Use Current API</option>
-            <option value="profile">Use Specific Profile</option>
-          </select>
-          <div class="scp-sp-field" id="scp-sp-global-profile-group" style="display:none; margin-top:6px">
-            <label class="scp-sp-label">Connection Profile</label>
-            <select class="scp-sp-select" id="scp-sp-conn-profile">
-              <option value="">-- Select Profile --</option>
-            </select>
-          </div>
-          <div class="scp-sp-field">
-            <label class="scp-sp-label">Max Response Tokens</label>
-            <input type="number" class="scp-sp-input" id="scp-sp-max-tokens" placeholder="2048" min="64" max="32768">
-          </div>
-        </div>
-
-        <div class="scp-sp-group">
-          <div class="scp-sp-group-title"><i class="fa-solid fa-box-archive"></i> Context Payload</div>
-          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-include-sysprompt"><span>Include ST System Prompt</span></label>
-          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-include-anote"><span>Include Author's Note</span></label>
-          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-include-charcard"><span>Include Character Card</span></label>
-          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-include-persona"><span>Include User Persona</span></label>
-          <div class="scp-sp-field" style="margin-top:8px">
-            <label class="scp-sp-label">Main Chat Depth</label>
-            <div class="scp-sp-row">
-              <input type="range" class="scp-slider" id="scp-sp-depth-slider" min="0" max="100" style="flex:1">
-              <span class="scp-depth-val" id="scp-sp-depth-val" style="cursor:default">15</span>
-            </div>
-          </div>
-          <div class="scp-sp-field">
-            <label class="scp-sp-label">Session History Limit</label>
-            <input type="number" class="scp-sp-input" id="scp-sp-history-limit" placeholder="50" min="1" max="500">
-          </div>
-          <div class="scp-sp-field">
-            <label class="scp-sp-label">Reasoning Trim Strings <span class="scp-sp-hint">(one per line)</span></label>
-            <textarea class="scp-sp-textarea" id="scp-sp-reasoning-trim" rows="2" placeholder="&lt;think&gt;&lt;/think&gt;"></textarea>
-          </div>
-        </div>
-
-        <div class="scp-sp-group">
-          <div class="scp-sp-group-title"><i class="fa-solid fa-message"></i> System Prompt</div>
-          <textarea class="scp-sp-textarea scp-sp-textarea-lg" id="scp-sp-sysprompt" rows="7"></textarea>
-          <button class="scp-action-btn" id="scp-sp-reset-prompt" style="margin-top:6px">${I.refresh}<span>Reset to Default</span></button>
-        </div>
-
-        <div class="scp-sp-group">
-          <div class="scp-sp-group-title"><i class="fa-solid fa-book"></i> Lorebook AI Edits</div>
-          <div class="scp-sp-field">
-            <label class="scp-sp-label">AI Edit Prompt <span class="scp-sp-hint">macros: {{lorebook_output}}, {{active_lorebooks}}</span></label>
-            <textarea class="scp-sp-textarea" id="scp-sp-lb-manage-prompt" rows="4" style="font-family:monospace;font-size:11px"></textarea>
-            <button class="scp-action-btn" id="scp-sp-reset-lb-prompt" style="margin-top:4px">${I.refresh}<span>Reset</span></button>
-          </div>
-          <div class="scp-sp-field">
-            <label class="scp-sp-label">Main chat scan depth</label>
-            <input type="number" class="scp-sp-input" id="scp-sp-lb-st-scan-depth" placeholder="5" min="0" max="200">
-          </div>
-          <div class="scp-sp-field">
-            <label class="scp-sp-label">Copilot scan depth</label>
-            <input type="number" class="scp-sp-input" id="scp-sp-lb-copilot-scan-depth" placeholder="6" min="0" max="200">
-          </div>
-        </div>
-
-        <div class="scp-sp-group">
-          <div class="scp-sp-group-title"><i class="fa-solid fa-palette"></i> Interface Theme</div>
-          <div id="scp-sp-theme-section"></div>
-        </div>
-
-        <div class="scp-sp-group">
-          <div class="scp-sp-group-title" style="color:var(--scp-danger)"><i class="fa-solid fa-triangle-exclamation"></i> Danger Zone</div>
-          <button class="scp-action-btn scp-sp-danger-btn" id="scp-sp-clear-sessions">${I.trash}<span>Clear All Sessions</span></button>
-        </div>
-
-      </div>
-
-      <!-- ══ SESSION TAB ══ -->
-      <div class="scp-sp-tab-pane" id="scp-sp-pane-session" style="display:none">
-
-        <div class="scp-sp-session-banner">
-          <span>${I.edit}</span>
-          <span>Overrides global settings for the current session only.</span>
-          <button class="scp-sp-reset-all-btn" id="scp-sp-reset-all-overrides">Reset All</button>
-        </div>
-
-        <div class="scp-sp-group">
-          <div class="scp-sp-group-title"><i class="fa-solid fa-plug"></i> Connection</div>
-          <div class="scp-sp-field">
-            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="connectionSource">Connection Source</label>
-            <div class="scp-sp-ov-wrap">
-              <select class="scp-sp-select" id="scp-sp-ov-conn-source">
-                <option value="default">Use Current API</option>
-                <option value="profile">Use Specific Profile</option>
-              </select>
-              <button class="scp-sp-ov-clear" data-ovkey="connectionSource" title="Clear override" disabled>↺</button>
-            </div>
-          </div>
-          <div class="scp-sp-field" id="scp-sp-ov-profile-group" style="display:none">
-            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="connectionProfileId">Profile</label>
-            <div class="scp-sp-ov-wrap">
-              <select class="scp-sp-select" id="scp-sp-ov-conn-profile">
-                <option value="">-- Select Profile --</option>
-              </select>
-              <button class="scp-sp-ov-clear" data-ovkey="connectionProfileId" title="Clear override" disabled>↺</button>
-            </div>
-          </div>
-          <div class="scp-sp-field">
-            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="maxTokens">Max Tokens</label>
-            <div class="scp-sp-ov-wrap">
-              <input type="number" class="scp-sp-input" id="scp-sp-ov-max-tokens" placeholder="Use global" min="64" max="32768">
-              <button class="scp-sp-ov-clear" data-ovkey="maxTokens" title="Clear override" disabled>↺</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="scp-sp-group">
-          <div class="scp-sp-group-title"><i class="fa-solid fa-box-archive"></i> Context Payload</div>
-          <div class="scp-sp-ov-check-row">
-            <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-include-sysprompt"><span>Include ST System Prompt</span></label>
-            <button class="scp-sp-ov-clear" data-ovkey="includeSystemPrompt" title="Clear override" disabled>↺</button>
-          </div>
-          <div class="scp-sp-ov-check-row">
-            <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-include-anote"><span>Include Author's Note</span></label>
-            <button class="scp-sp-ov-clear" data-ovkey="includeAuthorsNote" title="Clear override" disabled>↺</button>
-          </div>
-          <div class="scp-sp-ov-check-row">
-            <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-include-charcard"><span>Include Character Card</span></label>
-            <button class="scp-sp-ov-clear" data-ovkey="includeCharacterCard" title="Clear override" disabled>↺</button>
-          </div>
-          <div class="scp-sp-ov-check-row">
-            <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-include-persona"><span>Include User Persona</span></label>
-            <button class="scp-sp-ov-clear" data-ovkey="includeUserPersonality" title="Clear override" disabled>↺</button>
-          </div>
-          <div class="scp-sp-field" style="margin-top:8px">
-            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="contextDepth">Main Chat Depth</label>
-            <div class="scp-sp-ov-wrap">
-              <input type="range" class="scp-slider" id="scp-sp-ov-depth-slider" min="0" max="100" style="flex:1">
-              <span class="scp-depth-val" id="scp-sp-ov-depth-val" style="cursor:default">15</span>
-              <button class="scp-sp-ov-clear" data-ovkey="contextDepth" title="Clear override" disabled>↺</button>
-            </div>
-          </div>
-          <div class="scp-sp-field">
-            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="localHistoryLimit">History Limit</label>
-            <div class="scp-sp-ov-wrap">
-              <input type="number" class="scp-sp-input" id="scp-sp-ov-history-limit" placeholder="Use global" min="1" max="500">
-              <button class="scp-sp-ov-clear" data-ovkey="localHistoryLimit" title="Clear override" disabled>↺</button>
-            </div>
-          </div>
-          <div class="scp-sp-field">
-            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="reasoningTrimStrings">Reasoning Trim</label>
-            <div class="scp-sp-ov-wrap scp-sp-ov-wrap-col">
-              <textarea class="scp-sp-textarea" id="scp-sp-ov-reasoning-trim" rows="2" placeholder="Use global"></textarea>
-              <button class="scp-sp-ov-clear" data-ovkey="reasoningTrimStrings" title="Clear override" disabled>↺</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="scp-sp-group">
-          <div class="scp-sp-group-title"><i class="fa-solid fa-message"></i> System Prompt</div>
-          <div class="scp-sp-ov-label-row">
-            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="systemPrompt">Prompt</label>
-            <button class="scp-sp-ov-clear" data-ovkey="systemPrompt" title="Clear override" disabled>↺</button>
-          </div>
-          <textarea class="scp-sp-textarea scp-sp-textarea-lg" id="scp-sp-ov-sysprompt" placeholder="Using global system prompt…"></textarea>
-        </div>
-
-      </div>
-    </div>
-
-    <div class="scp-sp-footer">
-      <span class="scp-sp-footer-info" id="scp-sp-footer-info"></span>
-    </div>
-
-  </div>
-</div>`;
+        // Use CSS class for smooth animated show/hide
+        if (visible) {
+            bar.classList.add('scp-qp-bar--open');
+        } else {
+            bar.classList.remove('scp-qp-bar--open');
+        }
+        if (toggleBtn) toggleBtn.classList.toggle('active', s.quickPromptsVisible);
     }
 
-    // ─── UI Construction ────────────────────────────────────────────────────────
+    let _qpIconPickerEl = null;
 
-    function buildWindowHTML() {
-        return `
-<div id="${WIN_ID}" class="scp-window" style="display:none">
-    <div class="scp-rh scp-rh-n"></div><div class="scp-rh scp-rh-e"></div>
-    <div class="scp-rh scp-rh-s"></div><div class="scp-rh scp-rh-w"></div>
-    <div class="scp-rh scp-rh-ne"></div><div class="scp-rh scp-rh-se"></div>
-    <div class="scp-rh scp-rh-sw"></div><div class="scp-rh scp-rh-nw"></div>
+    function showQPIconPicker(anchorEl, currentIcon, onSelect) {
+        if (_qpIconPickerEl) { _qpIconPickerEl.remove(); _qpIconPickerEl = null; }
+        const pop = document.createElement('div');
+        pop.className = 'scp-qp-icon-picker';
+        for (const emoji of QP_ICON_POOL) {
+            const btn = document.createElement('button');
+            btn.className = `scp-qp-icon-option${emoji === currentIcon ? ' active' : ''}`;
+            btn.textContent = emoji;
+            btn.addEventListener('click', () => { onSelect(emoji); pop.remove(); _qpIconPickerEl = null; });
+            pop.appendChild(btn);
+        }
+        document.body.appendChild(pop);
+        _qpIconPickerEl = pop;
+        const rect = anchorEl.getBoundingClientRect();
+        pop.style.cssText = `position:fixed;z-index:999999;top:${rect.bottom + 4}px;left:${rect.left}px`;
+        requestAnimationFrame(() => {
+            const pr = pop.getBoundingClientRect();
+            if (pr.right > window.innerWidth - 8) pop.style.left = `${window.innerWidth - pr.width - 8}px`;
+            if (pr.bottom > window.innerHeight - 8) pop.style.top = `${rect.top - pr.height - 6}px`;
+        });
+        const onOut = e => {
+            if (!pop.contains(e.target) && e.target !== anchorEl) {
+                pop.remove(); _qpIconPickerEl = null;
+                document.removeEventListener('mousedown', onOut, true);
+            }
+        };
+        setTimeout(() => document.addEventListener('mousedown', onOut, true), 0);
+    }
 
-    <div class="scp-header" id="scp-drag-handle">
-        <div class="scp-header-left">
-            <span class="scp-logo">${I.bot}</span>
-            <span class="scp-title">ST-Copilot</span>
-            <span class="scp-char-badge" id="scp-char-badge"></span>
-        </div>
-        <div class="scp-header-right">
-            <div class="scp-opacity-wrap">
-                <button class="scp-hbtn" id="scp-opacity-btn" title="Window opacity">${I.opacity}</button>
-                <div class="scp-opacity-pop" id="scp-opacity-pop">
-                    <input type="range" id="scp-opacity-slider" min="20" max="100" value="95" class="scp-slider">
-                    <span id="scp-opacity-val">95%</span>
-                </div>
-            </div>
-            <button class="scp-hbtn scp-hbtn-gear" id="scp-ext-settings-btn" title="Settings">${I.gear}<span class="scp-gear-ov-dot" id="scp-gear-ov-dot" style="display:none"></span></button>
-            <button class="scp-hbtn" id="scp-min-btn" title="Minimize to icon">${I.minus}</button>
-            <button class="scp-hbtn scp-hbtn-close" id="scp-close-btn" title="Hide">${I.x}</button>
-        </div>
-    </div>
+    function buildQPSettingsUI(container) {
+        if (!container) return;
+        container.innerHTML = '';
 
-    <div class="scp-toolbar">
-        <div class="scp-sess-wrap">
-            <div class="scp-sess-dropdown" id="scp-sess-dropdown">
-                <button class="scp-sess-trigger" id="scp-sess-trigger">
-                    <span class="scp-sess-trigger-name" id="scp-sess-name">Session</span>
-                    ${I.chevron}
-                </button>
-                <div class="scp-sess-panel" id="scp-sess-panel">
-                    <div class="scp-sess-list" id="scp-sess-list"></div>
-                    <div class="scp-sess-footer">
-                        <button class="scp-sess-new-btn" id="scp-new-sess-btn">
-                            ${I.plus}<span>New Session</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <button class="scp-tbtn" id="scp-rename-sess-btn" title="Rename session">${I.edit}</button>
-            <button class="scp-tbtn scp-tbtn-danger" id="scp-del-sess-btn" title="Delete session">${I.trash}</button>
-        </div>
-        <div class="scp-toolbar-sep"></div>
-        <label class="scp-depth-label" title="Main chat messages injected into each request">Ctx</label>
-        <input type="range" id="scp-depth-slider" class="scp-slider scp-depth-slider" min="0" max="100" step="1" value="15">
-        <span class="scp-depth-val scp-depth-clickable" id="scp-depth-val" title="Click to enter exact value">15</span>
-        <div class="scp-toolbar-sep"></div>
-        <button class="scp-tbtn" id="scp-lb-btn" title="Lorebook Manager">${I.book}</button>
-        <button class="scp-tbtn" id="scp-search-btn" title="Search in chat (Ctrl+F)">${I.search}</button>
-    </div>
+        const list = document.createElement('div');
+        list.className = 'scp-qp-settings-list';
 
-    <div class="scp-search-bar" id="scp-search-bar">
-        <span class="scp-search-bar-icon">${I.search}</span>
-        <input type="text" id="scp-search-input" class="scp-search-input" placeholder="Search messages…" autocomplete="off" spellcheck="false">
-        <button class="scp-search-nav scp-search-word-btn" id="scp-search-word" title="Whole word">W</button>
-        <span class="scp-search-count" id="scp-search-count"></span>
-        <button class="scp-search-nav" id="scp-search-prev" title="Previous (Shift+Enter)">↑</button>
-        <button class="scp-search-nav" id="scp-search-next" title="Next (Enter)">↓</button>
-        <button class="scp-search-close-btn" id="scp-search-close" title="Close">✕</button>
-    </div>
+        const renderList = () => {
+            list.innerHTML = '';
+            const curPrompts = getSettings().quickPrompts || [];
+            if (!curPrompts.length) {
+                list.innerHTML = `<div style="font-size:11px;color:var(--scp-text-muted);text-align:center;padding:10px 0">No quick prompts yet. Add one below.</div>`;
+            }
+            curPrompts.forEach((qp, idx) => {
+                const row = document.createElement('div');
+                row.className = 'scp-qp-settings-row';
 
-    <div class="scp-messages" id="scp-messages"></div>
+                const iconBtn = document.createElement('button');
+                iconBtn.className = 'scp-qp-settings-icon-btn';
+                iconBtn.textContent = qp.icon || '⚡';
+                iconBtn.title = 'Change icon';
+                iconBtn.addEventListener('click', e => {
+                    e.stopPropagation();
+                    showQPIconPicker(iconBtn, qp.icon || '⚡', emoji => {
+                        getSettings().quickPrompts[idx].icon = emoji;
+                        saveSettings(); iconBtn.textContent = emoji; renderQuickPromptsBar();
+                    });
+                });
 
-    <div class="scp-thinking-bar" id="scp-thinking-bar" style="display:none">
-        <div class="scp-dots"><span></span><span></span><span></span></div>
-        <span id="scp-thinking-text">Thinking…</span>
-        <button class="scp-stop-btn" id="scp-stop-btn" title="Abort">${I.stop}</button>
-    </div>
+                const labelInput = document.createElement('input');
+                labelInput.type = 'text'; labelInput.className = 'scp-qp-settings-label-input scp-sp-input';
+                labelInput.placeholder = 'Label'; labelInput.value = qp.label || '';
+                labelInput.addEventListener('input', () => {
+                    getSettings().quickPrompts[idx].label = labelInput.value;
+                    saveSettings(); renderQuickPromptsBar();
+                });
 
-    <div class="scp-actions-bar">
-        <button class="scp-action-btn" id="scp-inspect-btn" title="View raw context payload">${I.search}<span>Context</span></button>
-        <button class="scp-action-btn" id="scp-regen-btn" title="Regenerate last response">${I.refresh}<span>Regen</span></button>
-        <div class="scp-flex-grow"></div>
-        <span class="scp-token-count" id="scp-token-count" title="Estimated payload tokens"></span>
-        <span class="scp-msg-count" id="scp-msg-count"></span>
-    </div>
+                const moveUpBtn = document.createElement('button');
+                moveUpBtn.className = 'scp-qp-settings-move'; moveUpBtn.textContent = '↑';
+                moveUpBtn.title = 'Move up'; moveUpBtn.disabled = idx === 0;
+                moveUpBtn.addEventListener('click', () => {
+                    if (idx === 0) return;
+                    const arr = getSettings().quickPrompts;
+                    [arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]];
+                    saveSettings(); renderList(); renderQuickPromptsBar();
+                });
 
-    <div class="scp-input-row">
-        <textarea id="scp-input" class="scp-input" placeholder="Ask about the roleplay…" rows="1"></textarea>
-        <button class="scp-send-btn" id="scp-send-btn" title="Send (Enter)">${I.send}</button>
-    </div>
-</div>
+                const moveDnBtn = document.createElement('button');
+                moveDnBtn.className = 'scp-qp-settings-move'; moveDnBtn.textContent = '↓';
+                moveDnBtn.title = 'Move down'; moveDnBtn.disabled = idx === curPrompts.length - 1;
+                moveDnBtn.addEventListener('click', () => {
+                    const arr = getSettings().quickPrompts;
+                    if (idx >= arr.length - 1) return;
+                    [arr[idx], arr[idx + 1]] = [arr[idx + 1], arr[idx]];
+                    saveSettings(); renderList(); renderQuickPromptsBar();
+                });
 
-<div id="${ICON_ID}" class="scp-dock-icon" style="display:none" title="ST-Copilot — click to restore">
-    ${I.bot}<span class="scp-dock-pulse"></span>
-</div>
+                const delBtn = document.createElement('button');
+                delBtn.className = 'scp-qp-settings-del'; delBtn.innerHTML = I.trash; delBtn.title = 'Delete';
+                delBtn.addEventListener('click', async () => {
+                    const ok = await showCustomDialog({ type: 'confirm', title: 'Delete Prompt', message: `Delete "${qp.label || 'this prompt'}"?` });
+                    if (!ok) return;
+                    getSettings().quickPrompts.splice(idx, 1);
+                    saveSettings(); renderList(); renderQuickPromptsBar();
+                });
 
-<div id="${MODAL_ID}" class="scp-modal-overlay" style="display:none">
-    <div class="scp-modal">
-        <div class="scp-modal-header">
-            <span>${I.search} Raw Context Payload</span>
-            <button class="scp-hbtn scp-hbtn-close" id="scp-modal-close">${I.x}</button>
-        </div>
-        <div class="scp-modal-tabs">
-            <button class="scp-modal-tab active" data-tab="formatted">Formatted</button>
-            <button class="scp-modal-tab" data-tab="json">JSON</button>
-        </div>
-        <div class="scp-modal-body">
-            <pre id="scp-ctx-formatted" class="scp-ctx-pre"></pre>
-            <pre id="scp-ctx-json" class="scp-ctx-pre" style="display:none"></pre>
-        </div>
-        <div class="scp-modal-footer">
-            <button class="scp-action-btn" id="scp-ctx-copy-btn">${I.copy}<span>Copy</span></button>
-        </div>
-    </div>
-</div>`;
+                const textArea = document.createElement('textarea');
+                textArea.className = 'scp-qp-settings-text scp-sp-textarea';
+                textArea.placeholder = 'Prompt text… (supports {{user}}, {{char}} macros)';
+                textArea.rows = 2; textArea.value = qp.text || '';
+                textArea.addEventListener('input', () => { getSettings().quickPrompts[idx].text = textArea.value; saveSettings(); });
+
+                const controls = document.createElement('div');
+                controls.className = 'scp-qp-settings-controls';
+                controls.appendChild(moveUpBtn); controls.appendChild(moveDnBtn); controls.appendChild(delBtn);
+
+                const top = document.createElement('div');
+                top.className = 'scp-qp-settings-row-top';
+                top.appendChild(iconBtn); top.appendChild(labelInput); top.appendChild(controls);
+
+                row.appendChild(top); row.appendChild(textArea);
+                list.appendChild(row);
+            });
+        };
+
+        renderList();
+
+        const addBtn = document.createElement('button');
+        addBtn.className = 'scp-action-btn'; addBtn.style.marginTop = '8px';
+        addBtn.innerHTML = `${I.plus}<span>Add Prompt</span>`;
+        addBtn.addEventListener('click', async () => {
+            const label = await showCustomDialog({ type: 'prompt', title: 'New Quick Prompt', message: 'Label for this prompt:', placeholder: 'My Prompt' });
+            if (label === null) return;
+            getSettings().quickPrompts.push({ id: genId('qp'), label: label.trim() || 'Prompt', icon: '⚡', text: '' });
+            saveSettings(); renderList(); renderQuickPromptsBar();
+        });
+
+        container.appendChild(list); container.appendChild(addBtn);
+    }
+
+    // ─── Chat Message Picker ──────────────────────────────────────────────────────
+
+    let _pickerLastIdx = -1;
+
+    function getPickedChatIndices() {
+        try { return getCurrentSession().pickedChatIndices || []; } catch(_) { return []; }
+    }
+
+    function setPickedChatIndices(indices) {
+        try {
+            const sess = getCurrentSession();
+            sess.pickedChatIndices = [...indices].sort((a, b) => a - b);
+            saveSettings();
+            updatePickBtnState();
+            updateMsgCount(sess);
+        } catch(_) {}
+    }
+
+    function updatePickBtnState() {
+        const picked = getPickedChatIndices();
+        const btn = document.getElementById('scp-pick-btn');
+        const badge = document.getElementById('scp-pick-badge');
+        const isActive = picked.length > 0;
+        btn?.classList.toggle('active', isActive);
+        if (badge) { badge.style.display = isActive ? '' : 'none'; badge.textContent = picked.length; }
+        const depthSlider = document.getElementById('scp-depth-slider');
+        const depthVal = document.getElementById('scp-depth-val');
+        depthSlider?.classList.toggle('scp-slider-overridden', isActive);
+        depthVal?.classList.toggle('scp-depth-val-overridden', isActive);
+    }
+
+    function openChatPicker() {
+        const overlay = document.getElementById('scp-picker-overlay');
+        if (!overlay) return;
+        applyCustomTheme(getSettings().customTheme || THEME_PRESETS.default);
+        _pickerLastIdx = -1;
+        renderPickerMessages();
+        overlay.style.display = 'flex';
+    }
+
+    function closeChatPicker() {
+        const overlay = document.getElementById('scp-picker-overlay');
+        if (overlay) overlay.style.display = 'none';
+    }
+
+    function renderPickerMessages() {
+        const body = document.getElementById('scp-picker-body');
+        if (!body) return;
+        const ctx = SillyTavern.getContext();
+        const msgs = ctx.chat || [];
+        const pickedSet = new Set(getPickedChatIndices());
+        const charInfo = getCharInfo();
+
+        body.innerHTML = '';
+        if (!msgs.length) {
+            body.innerHTML = '<div style="padding:24px;text-align:center;color:var(--scp-text-muted)">No messages in current chat</div>';
+            _updatePickerCountEl(0);
+            return;
+        }
+
+        const frag = document.createDocumentFragment();
+        msgs.forEach((msg, idx) => {
+            const isUser = msg.is_user;
+            const name = isUser ? (ctx.name1 || 'User') : (msg.name || charInfo?.name || 'Character');
+            const isSelected = pickedSet.has(idx);
+            const row = document.createElement('div');
+            row.className = `scp-picker-row${isSelected ? ' selected' : ''}${isUser ? ' user' : ''}`;
+            row.dataset.idx = idx;
+
+            const cb = document.createElement('div');
+            cb.className = `scp-picker-cb${isSelected ? ' checked' : ''}`;
+
+            const meta = document.createElement('div');
+            meta.className = 'scp-picker-meta';
+
+            const idxEl = document.createElement('span');
+            idxEl.className = 'scp-picker-idx';
+            idxEl.textContent = `#${idx + 1}`;
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'scp-picker-name';
+            nameEl.textContent = name;
+
+            meta.appendChild(idxEl);
+            meta.appendChild(nameEl);
+
+            const textEl = document.createElement('div');
+            textEl.className = 'scp-picker-text';
+            const raw = (msg.mes || '').replace(/<[^>]+>/g, '').trim();
+            textEl.textContent = raw.length > 150 ? raw.slice(0, 150) + '…' : raw;
+
+            const infoCol = document.createElement('div');
+            infoCol.className = 'scp-picker-info-col';
+            infoCol.appendChild(meta);
+            infoCol.appendChild(textEl);
+
+            row.appendChild(cb);
+            row.appendChild(infoCol);
+
+            row.addEventListener('click', e => {
+                const curIdx = parseInt(row.dataset.idx);
+                if (e.shiftKey && _pickerLastIdx >= 0) {
+                    const lo = Math.min(_pickerLastIdx, curIdx);
+                    const hi = Math.max(_pickerLastIdx, curIdx);
+                    const targetState = !row.classList.contains('selected');
+                    body.querySelectorAll('.scp-picker-row').forEach(r => {
+                        const ri = parseInt(r.dataset.idx);
+                        if (ri >= lo && ri <= hi) {
+                            r.classList.toggle('selected', targetState);
+                            r.querySelector('.scp-picker-cb')?.classList.toggle('checked', targetState);
+                        }
+                    });
+                } else {
+                    const sel = row.classList.toggle('selected');
+                    cb.classList.toggle('checked', sel);
+                    _pickerLastIdx = curIdx;
+                }
+                _updatePickerCountEl();
+            });
+
+            frag.appendChild(row);
+        });
+        body.appendChild(frag);
+        _updatePickerCountEl(pickedSet.size);
+        const firstSel = body.querySelector('.scp-picker-row.selected');
+        if (firstSel) setTimeout(() => firstSel.scrollIntoView({ block: 'center' }), 50);
+    }
+
+    function _updatePickerCountEl(count) {
+        const el = document.getElementById('scp-picker-count');
+        if (!el) return;
+        const n = count !== undefined ? count : document.querySelectorAll('#scp-picker-body .scp-picker-row.selected').length;
+        el.textContent = `${n} selected`;
+    }
+
+    function setupChatPickerListeners() {
+        const overlay = document.getElementById('scp-picker-overlay');
+        if (!overlay) return;
+
+        let _mouseDownTarget = null;
+        overlay.addEventListener('mousedown', e => { _mouseDownTarget = e.target; });
+        overlay.addEventListener('click', e => { if (e.target === overlay && _mouseDownTarget === overlay) closeChatPicker(); });
+
+        document.getElementById('scp-picker-close')?.addEventListener('click', closeChatPicker);
+
+        document.getElementById('scp-picker-all')?.addEventListener('click', () => {
+            document.querySelectorAll('#scp-picker-body .scp-picker-row').forEach(r => {
+                r.classList.add('selected');
+                r.querySelector('.scp-picker-cb')?.classList.add('checked');
+            });
+            _updatePickerCountEl();
+        });
+
+        document.getElementById('scp-picker-invert')?.addEventListener('click', () => {
+            document.querySelectorAll('#scp-picker-body .scp-picker-row').forEach(r => {
+                const s = r.classList.toggle('selected');
+                r.querySelector('.scp-picker-cb')?.classList.toggle('checked', s);
+            });
+            _updatePickerCountEl();
+        });
+
+        document.getElementById('scp-picker-clear')?.addEventListener('click', () => {
+            document.querySelectorAll('#scp-picker-body .scp-picker-row').forEach(r => {
+                r.classList.remove('selected');
+                r.querySelector('.scp-picker-cb')?.classList.remove('checked');
+            });
+            _updatePickerCountEl();
+        });
+
+        document.getElementById('scp-picker-apply')?.addEventListener('click', () => {
+            const rows = document.querySelectorAll('#scp-picker-body .scp-picker-row');
+            const indices = [];
+            rows.forEach(r => { if (r.classList.contains('selected')) indices.push(parseInt(r.dataset.idx)); });
+            setPickedChatIndices(indices);
+            closeChatPicker();
+        });
     }
 
     // ─── DOM References ─────────────────────────────────────────────────────────
 
     let windowEl, iconEl, modalEl;
 
-    function injectUI() {
-        // Main window + icon + context modal inside wrapper
-        const root = document.createElement('div');
-        root.innerHTML = buildWindowHTML();
-        document.body.appendChild(root);
+    async function injectUI() {
+        const ctx = SillyTavern.getContext();
 
-        // LB overlay and diff modal appended directly to body —
-        // bypasses any ancestor with CSS transform that would break position:fixed
-        const lbRoot = document.createElement('div');
-        lbRoot.innerHTML = buildLorebookManagerHTML();
-        document.body.appendChild(lbRoot);
+        const parseTemplate = (html) => {
+            if (!html) return '';
+            return html.replace(/\$\{I\.([a-zA-Z0-9_]+)\}/g, (_, iconName) => I[iconName] || '');
+        };
 
-        // Settings overlay — also direct to body
-        const spRoot = document.createElement('div');
-        spRoot.innerHTML = buildSettingsOverlayHTML();
-        document.body.appendChild(spRoot);
+        const loadAndInject = async (templateName) => {
+            const html = await ctx.renderExtensionTemplateAsync(__extPath, templateName);
+            if (html) {
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = parseTemplate(html);
+                while (wrapper.firstChild) document.body.appendChild(wrapper.firstChild);
+            } else {
+                console.error(`[${EXT_DISPLAY}] Не удалось загрузить HTML: ${templateName}.html`);
+            }
+        };
+
+        await loadAndInject('window');
+        await loadAndInject('lorebook_manager');
+        await loadAndInject('settings_overlay');
+        await loadAndInject('chat_picker');
 
         windowEl = document.getElementById(WIN_ID);
         iconEl = document.getElementById(ICON_ID);
         modalEl = document.getElementById(MODAL_ID);
+
+        // Ensure dock icon is a direct child of body so display:none on windowEl doesn't cascade to it
+        if (iconEl && iconEl.parentElement !== document.body) {
+            document.body.appendChild(iconEl);
+        }
     }
 
     function $(id) { return document.getElementById(id); }
@@ -3153,90 +3544,289 @@
     // ─── Message Rendering ──────────────────────────────────────────────────────
 
     function renderMarkdown(text) {
-        let out = text
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
-
         const codeBlocks = [];
-        out = out.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+        let out = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+            if (lang && lang.toLowerCase() === 'html') {
+                const id = `scp-hb-${_htmlBlockCounter++}`;
+                _htmlBlockRegistry.set(id, code.trim());
+                return `\x00H${id}\x00`;
+            }
             const i = codeBlocks.length;
-            codeBlocks.push(`<pre class="scp-code-block${lang ? ` lang-${lang}` : ''}"><code>${code.trim()}</code></pre>`);
+            const escaped = code.trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            codeBlocks.push(`<pre class="scp-code-block${lang ? ` lang-${lang}` : ''}"><code>${escaped}</code></pre>`);
             return `\x00B${i}\x00`;
         });
 
+        out = out.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         out = out.replace(/`([^`\n]+)`/g, '<code class="scp-inline-code">$1</code>');
 
+        const applyInline = (s) => {
+            let res = s;
+            res = res.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+            res = res.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            res = res.replace(/~~(.+?)~~/g, '<del>$1</del>');
+            res = res.replace(/\*([^<>\*\n]+)\*/g, '<em>$1</em>');
+            return res;
+        };
+
         const lines = out.split('\n');
-        const output =[];
-        let listItems = [];
+
+        const getULIndent = (l) => { const m = l.match(/^(\s*)[*\-+]\s+\S/); return m ? m[1].length : -1; };
+        const getOLIndent = (l) => { const m = l.match(/^(\s*)\d+\.\s+\S/); return m ? m[1].length : -1; };
+        const isListLine = (l) => getULIndent(l) >= 0 || getOLIndent(l) >= 0;
+
+        const buildNestedList = (listLines) => {
+            const stack = [];
+            let r = '';
+            const closeUntil = (targetIndent, targetType) => {
+                while (stack.length) {
+                    const top = stack[stack.length - 1];
+                    if (top.indent > targetIndent || (top.indent === targetIndent && top.type !== targetType)) {
+                        r += `</li></${top.type}>`;
+                        stack.pop();
+                    } else {
+                        break;
+                    }
+                }
+            };
+            for (let line of listLines) {
+                if (!line.trim()) continue;
+                if (!isListLine(line)) {
+                    r += `<br>${applyInline(line.trim())}`;
+                    continue;
+                }
+                const ulI = getULIndent(line);
+                const olI = getOLIndent(line);
+                const indent = ulI >= 0 ? ulI : olI;
+                const type = ulI >= 0 ? 'ul' : 'ol';
+                const cls = `scp-list${type === 'ol' ? ' scp-list-ol' : ''}`;
+                
+                let content = type === 'ul'
+                    ? line.replace(/^\s*[*\-+]\s+/, '')
+                    : line.replace(/^\s*\d+\.\s+/, '');
+                
+                content = applyInline(content);
+
+                closeUntil(indent, type);
+                
+                if (stack.length && stack[stack.length - 1].indent === indent && stack[stack.length - 1].type === type) {
+                    r += `</li><li>${content}`;
+                } else {
+                    r += `<${type} class="${cls}"><li>${content}`;
+                    stack.push({ indent, type });
+                }
+            }
+            while (stack.length) r += `</li></${stack.pop().type}>`;
+            return r;
+        };
+
+        const segs = [];
+        const pushBlock = (h) => segs.push({ t: 'block', h });
+        const pushInline = (h) => segs.push({ t: 'inline', h });
+
+        let listBuf = [];
         let tableRows = [];
-        let bqLines =[];
+        let bqLines = [];
 
         const flushList = () => {
-            if (!listItems.length) return;
-            output.push(`<ul class="scp-list">${listItems.map(li => `<li>${li}</li>`).join('')}</ul>`);
-            listItems =[];
+            if (!listBuf.length) return;
+            pushBlock(buildNestedList(listBuf));
+            listBuf = [];
         };
         const flushTable = () => {
             if (!tableRows.length) return;
-            output.push(`<div class="scp-table-wrap"><table class="scp-table"><tbody>${tableRows.join('')}</tbody></table></div>`);
-            tableRows =[];
+            pushBlock(`<div class="scp-table-wrap"><table class="scp-table"><tbody>${tableRows.join('')}</tbody></table></div>`);
+            tableRows = [];
         };
         const flushBq = () => {
             if (!bqLines.length) return;
-            output.push(`<blockquote class="scp-blockquote">${bqLines.join('<br>')}</blockquote>`);
-            bqLines =[];
+            pushBlock(`<blockquote class="scp-blockquote">${bqLines.join('<br>')}</blockquote>`);
+            bqLines = [];
         };
 
-        for (const line of lines) {
-            const trLine = line.trim();
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimLine = line.trim();
 
-            if (/^(---+|\*\*\*+|___+)$/.test(trLine)) {
+            if (/^(---+|\*\*\*+|___+)$/.test(trimLine)) {
                 flushList(); flushTable(); flushBq();
-                output.push(`<hr class="scp-hr">`);
+                pushBlock('<hr class="scp-hr">');
                 continue;
             }
 
             const hm = line.match(/^(#{1,6})\s+(.+)/);
-            if (hm) { flushList(); flushTable(); flushBq(); output.push(`<span class="scp-h${hm[1].length}">${hm[2]}</span>`); continue; }
+            if (hm) {
+                flushList(); flushTable(); flushBq();
+                pushBlock(`<span class="scp-h${hm[1].length}">${applyInline(hm[2])}</span>`);
+                continue;
+            }
 
             const bq = line.match(/^&gt;\s*(.*)/);
-            if (bq) { flushList(); flushTable(); bqLines.push(bq[1]); continue; }
+            if (bq) { flushList(); flushTable(); bqLines.push(applyInline(bq[1])); continue; }
 
-            const lm = line.match(/^[*\-+]\s+(.+)/);
-            if (lm && !/^(---+|\*\*\*+|___+)$/.test(trLine)) { flushTable(); flushBq(); listItems.push(lm[1]); continue; }
-
-            const tm = line.match(/^\|(.*)\|$/);
+            const tm = trimLine.match(/^\|(.*)\|$/);
             if (tm) {
                 flushList(); flushBq();
-                if (/^[|\s\-:]+$/.test(trLine)) continue;
-                const cells = tm[1].split('|').map(c => c.trim());
+                if (/^[|\s\-:]+$/.test(trimLine)) continue;
+                const cells = tm[1].split('|').map(c => applyInline(c.trim()));
                 const tag = tableRows.length === 0 ? 'th' : 'td';
                 tableRows.push(`<tr>${cells.map(c => `<${tag}>${c}</${tag}>`).join('')}</tr>`);
                 continue;
             }
 
+            if (isListLine(line)) {
+                flushTable(); flushBq();
+                listBuf.push(line);
+                continue;
+            }
+
+            if (listBuf.length > 0 && trimLine && /^\s+/.test(line)) {
+                listBuf.push(line);
+                continue;
+            }
+
+            if (!trimLine) {
+                let nextNonEmpty = '';
+                for (let j = i + 1; j < lines.length; j++) {
+                    if (lines[j].trim()) { nextNonEmpty = lines[j]; break; }
+                }
+                if (nextNonEmpty && isListLine(nextNonEmpty)) {
+                    listBuf.push('');
+                } else {
+                    flushList(); flushTable(); flushBq();
+                    pushInline('');
+                }
+                continue;
+            }
+
             flushList(); flushTable(); flushBq();
-            output.push(line);
+            pushInline(applyInline(line));
         }
         flushList(); flushTable(); flushBq();
 
-        out = output.join('\n');
-        out = out.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-        out = out.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-        out = out.replace(/~~(.+?)~~/g, '<del>$1</del>');
-        out = out.replace(/\*(\S(?:[^*\n]*?\S)?)\*/g, '<em>$1</em>');
+        let result = '';
+        for (let i = 0; i < segs.length; i++) {
+            const seg = segs[i];
+            if (seg.t === 'inline' && i > 0 && segs[i - 1].t === 'inline') result += '<br>';
+            result += seg.h;
+        }
+        out = result;
 
-        out = out.replace(/(<(?:ul|pre)\b[^>]*>[\s\S]*?<\/(?:ul|pre)>)|\n/g,
-            (m, block) => block || '<br>');
-        
-        out = out.replace(/(?:<br>\s*)*(<hr class="scp-hr">)(?:\s*<br>)*/g, '$1');
-        out = out.replace(/(?:<br>\s*)*(<div class="scp-table-wrap">|<\/div>|<blockquote class="scp-blockquote">|<\/blockquote>)(?:\s*<br>)*/g, '$1');
-
+        out = out.replace(/\x00H(scp-hb-\d+)\x00/g, (_, id) => `<div class="scp-html-block-ph" data-hbid="${id}"></div>`);
         out = out.replace(/\x00B(\d+)\x00/g, (_, i) => codeBlocks[+i]);
 
         return out;
+    }
+
+    function prepareHtmlForIframe(code) {
+        const cs = `<script>(function(){
+function isTransparent(c){return !c||c==='transparent'||c==='rgba(0, 0, 0, 0)'||c==='rgba(0,0,0,0)';}
+function hasVisualBg(el){
+    if(!el) return false;
+    var cs=window.getComputedStyle(el);
+    if(!isTransparent(cs.backgroundColor)) return true;
+    if(cs.backgroundImage&&cs.backgroundImage!=='none') return true;
+    return false;
+}
+function applyFallbackTheme(){
+    var b=document.body,d=document.documentElement;
+    var hasBg=false;
+    // 1. computed styles on html + body
+    if(hasVisualBg(d)||hasVisualBg(b)) hasBg=true;
+    // 2. any element with inline style containing background
+    if(!hasBg){
+        var styled=document.querySelectorAll('[style]');
+        for(var i=0;i<styled.length;i++){if(hasVisualBg(styled[i])){hasBg=true;break;}}
+    }
+    // 3. <style> tags with body/html/root background rules
+    if(!hasBg){
+        var styleText='';
+        var styleEls=document.querySelectorAll('style');
+        for(var j=0;j<styleEls.length;j++) styleText+=styleEls[j].textContent;
+        if(/(?:body|html|:root)\s*\{[^}]*background/i.test(styleText)) hasBg=true;
+    }
+    if(!hasBg){
+        b.style.backgroundColor='#ffffff';
+        b.style.color='#1a1a1a';
+        window.parent.postMessage({type:'scp-iframe-bg',hasBg:false},'*');
+    } else {
+        window.parent.postMessage({type:'scp-iframe-bg',hasBg:true},'*');
+    }
+}
+function sh(){var b=document.body,d=document.documentElement;var h=Math.max(b?b.scrollHeight:0,b?b.offsetHeight:0,d.scrollHeight,d.offsetHeight);window.parent.postMessage({type:'scp-iframe-h',h:h},'*');}
+window.addEventListener('load',function(){
+    applyFallbackTheme();
+    sh();setTimeout(sh,150);setTimeout(sh,500);
+    if(window.ResizeObserver&&document.body){new ResizeObserver(sh).observe(document.body);}
+    else{var t;try{new MutationObserver(function(){clearTimeout(t);t=setTimeout(sh,80);}).observe(document.documentElement,{childList:true,subtree:true,attributes:true,characterData:true});}catch(e){}}
+});
+window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:String(m)},'*');return true;};
+})();<\/script>`;
+        const hasHtml = /<html[\s>]/i.test(code);
+        if (hasHtml) {
+            return /<\/body>/i.test(code) ? code.replace(/<\/body>/i, cs + '</body>') : code + cs;
+        }
+        return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}html,body{margin:0;padding:8px;font-family:system-ui,sans-serif;background:transparent}</style></head><body>${code}${cs}</body></html>`;
+    }
+
+    function createHTMLBlockEl(code) {
+        const wrap = document.createElement('div');
+        wrap.className = 'scp-html-block';
+
+        const toolbar = document.createElement('div');
+        toolbar.className = 'scp-html-block-toolbar';
+        const label = document.createElement('span');
+        label.className = 'scp-html-block-label';
+        label.textContent = 'HTML';
+        const previewBtn = document.createElement('button');
+        previewBtn.className = 'scp-html-block-btn active';
+        previewBtn.textContent = 'Preview';
+        const codeBtn = document.createElement('button');
+        codeBtn.className = 'scp-html-block-btn';
+        codeBtn.textContent = 'Code';
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'scp-html-block-btn';
+        copyBtn.textContent = 'Copy';
+        copyBtn.addEventListener('click', e => { e.stopPropagation(); copyText(code); });
+        toolbar.append(label, previewBtn, codeBtn, copyBtn);
+
+        const errorEl = document.createElement('div');
+        errorEl.className = 'scp-html-block-error';
+        errorEl.style.display = 'none';
+
+        const iframe = document.createElement('iframe');
+        iframe.className = 'scp-html-block-iframe';
+        iframe.setAttribute('sandbox', 'allow-scripts allow-modals allow-forms allow-popups allow-pointer-lock allow-downloads');
+        iframe.setAttribute('referrerpolicy', 'no-referrer');
+        iframe.srcdoc = prepareHtmlForIframe(code);
+
+        const codePre = document.createElement('pre');
+        codePre.className = 'scp-code-block scp-html-block-code';
+        codePre.style.display = 'none';
+        codePre.textContent = code;
+
+        previewBtn.addEventListener('click', () => {
+            iframe.style.display = '';
+            codePre.style.display = 'none';
+            previewBtn.classList.add('active');
+            codeBtn.classList.remove('active');
+        });
+        codeBtn.addEventListener('click', () => {
+            iframe.style.display = 'none';
+            codePre.style.display = '';
+            codeBtn.classList.add('active');
+            previewBtn.classList.remove('active');
+        });
+
+        wrap.append(toolbar, errorEl, iframe, codePre);
+        return wrap;
+    }
+
+    function postProcessHTMLBlocks(el) {
+        el.querySelectorAll('.scp-html-block-ph').forEach(ph => {
+            const code = _htmlBlockRegistry.get(ph.dataset.hbid);
+            if (code !== undefined) ph.replaceWith(createHTMLBlockEl(code));
+        });
     }
 
     function getDisplayContent(rawText, settings) {
@@ -3290,6 +3880,7 @@
         const content = document.createElement('div');
         content.className = 'scp-msg-content';
         content.innerHTML = renderMarkdown(displayText);
+        postProcessHTMLBlocks(content);
 
         const meta = document.createElement('div');
         meta.className = 'scp-msg-meta';
@@ -3351,6 +3942,7 @@
                         if (contentEl) {
                             const { content } = getDisplayContent(stripLBChangesBlock(msg.content), getSettings());
                             contentEl.innerHTML = renderMarkdown(content);
+                            postProcessHTMLBlocks(contentEl);
                         }
                         renderProposalCard(changes, el);
                     }
@@ -3386,6 +3978,7 @@
                 if (contentEl) {
                     const { content } = getDisplayContent(stripLBChangesBlock(msg.content), getSettings());
                     contentEl.innerHTML = renderMarkdown(content);
+                    postProcessHTMLBlocks(contentEl);
                 }
                 renderProposalCard(changes, el);
             }
@@ -3468,7 +4061,7 @@
             clearTimeout(_tokenCalcTid);
             tel.textContent = '... tkns';
             _tokenCalcTid = setTimeout(async () => {
-                const settings = getSettings();
+                const settings = getEffectiveSettings();
                 const messages = await assembleMessages(session, settings, null);
                 const fullText = messages.map(m => m.content).join('\n');
                 const count = await estimateTokens(fullText);
@@ -3528,11 +4121,19 @@
             ? `${I.check}<span>Save & Resend</span>`
             : `${I.check}<span>Save</span>`;
 
+        const saveOnlyBtn = msg.role === 'user' ? document.createElement('button') : null;
+        if (saveOnlyBtn) {
+            saveOnlyBtn.className = 'scp-edit-btn scp-edit-cancel';
+            saveOnlyBtn.innerHTML = `${I.check}<span>Save</span>`;
+        }
+
         const cancelBtn = document.createElement('button');
         cancelBtn.className = 'scp-edit-btn scp-edit-cancel';
         cancelBtn.innerHTML = `${I.x}<span>Cancel</span>`;
 
-        row.appendChild(saveBtn); row.appendChild(cancelBtn);
+        row.appendChild(saveBtn);
+        if (saveOnlyBtn) row.appendChild(saveOnlyBtn);
+        row.appendChild(cancelBtn);
         contentEl.replaceWith(ta);
         wrapEl.querySelector('.scp-msg-actions').after(row);
         ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
@@ -3556,6 +4157,7 @@
             }
 
             nc.innerHTML = renderMarkdown(displayString);
+            postProcessHTMLBlocks(nc);
             ta.replaceWith(nc); 
             row.remove(); 
             wrapEl.classList.remove('is-editing');
@@ -3565,13 +4167,25 @@
             restoreMessageDOM(original);
         });
 
+        if (saveOnlyBtn) {
+            saveOnlyBtn.addEventListener('click', () => {
+                const rawText = ta.value.trim();
+                if (!rawText) return;
+                const newText = expandMacros(rawText);
+                updateMessage(session, msg.id, newText);
+                msg.content = newText;
+                recordStat(_SM.edit);
+                restoreMessageDOM(newText);
+            });
+        }
+
         saveBtn.addEventListener('click', async () => {
             const rawText = ta.value.trim();
             if (!rawText) return;
             const newText = expandMacros(rawText);
             updateMessage(session, msg.id, newText);
             msg.content = newText;
-            
+            recordStat(_SM.edit);
             restoreMessageDOM(newText);
             
             truncateAfter(session, msg.id);
@@ -3621,6 +4235,7 @@
         }
         
         updateMsgCount(session);
+        recordStat(_SM.regen);
         runGenerate(session, null, false);
     }
 
@@ -3816,11 +4431,16 @@
         try {
             if (addUserMsg && userText) { 
                 userMsg = addMessage(session, 'user', userText); 
-                appendMsgEl(userMsg); 
+                appendMsgEl(userMsg);
+                recordStat(_SM.msg);
             }
+            const fullMessages = await assembleMessages(session, settings, userText);
+            const fullPromptText = fullMessages.map(m => m.content).join('\n');
             const result = await callGenerate(session, settings, userText);
             if (result === null) return;
             appendMsgEl(addMessage(session, 'assistant', result));
+            estimateTokens(fullPromptText).then(n => { if (n > 0) recordStat(_SM.tokIn, n); });
+            if (result) recordStat(_SM.tokOut, Math.ceil(result.length / 3.5));
         } catch (err) {
             console.error(`[${EXT_DISPLAY}]`, err);
             toastr.error(`Generation failed: ${err.message}`, EXT_DISPLAY);
@@ -3858,6 +4478,7 @@
         if (lastUserIdx === -1) return;
         const userMsg = sess.messages[lastUserIdx];
         truncateAfter(sess, userMsg.id); removeMsgElAfter(userMsg.id);
+        recordStat(_SM.regen);
         runGenerate(sess, userMsg.content, false);
     }
 
@@ -3880,6 +4501,7 @@
     }
 
     function makeDraggable(handle, target) {
+        // ... Оставляем старый код для окна (windowEl) ...
         let active = false, ox = 0, oy = 0, sl = 0, st = 0;
         let _rafId = null, _px = 0, _py = 0;
 
@@ -3920,6 +4542,7 @@
     }
 
     function makeResizable(target) {
+        // ... Оставляем код для resize окна ...
         const MIN_W = 320, MIN_H = 300;
         target.querySelectorAll('.scp-rh').forEach(h => {
             const dir = [...h.classList].find(c => /^scp-rh-\w/.test(c))?.replace('scp-rh-', '') || '';
@@ -3972,56 +4595,67 @@
     }
 
     function makeIconDraggable(iconTarget) {
-        let active = false, moved = false, ox = 0, oy = 0, sl = 0, st = 0;
-        let _rafId = null, _px = 0, _py = 0;
-
-        const flush = () => {
-            iconTarget.style.left = `${_px}px`;
-            iconTarget.style.top = `${_py}px`;
-            iconTarget.style.right = 'auto'; iconTarget.style.bottom = 'auto';
-            _rafId = null;
-        };
+        let dragging = false;
+        let offsetX = 0, offsetY = 0;
 
         iconTarget.addEventListener('pointerdown', e => {
             if (e.pointerType === 'mouse' && e.button !== 0) return;
-            active = true; moved = false;
+            dragging = false;
             const r = iconTarget.getBoundingClientRect();
-            ox = e.clientX; oy = e.clientY; sl = r.left; st = r.top;
+            offsetX = e.clientX - r.left;
+            offsetY = e.clientY - r.top;
             iconTarget.setPointerCapture(e.pointerId);
-            iconTarget.classList.add('scp-icon-dragging');
             e.preventDefault();
         });
 
         iconTarget.addEventListener('pointermove', e => {
-            if (!active) return;
-            const dx = e.clientX - ox, dy = e.clientY - oy;
-            if (!moved && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) moved = true;
-            if (moved) {
-                _px = Math.max(0, Math.min(sl + dx, window.innerWidth - 46));
-                _py = Math.max(0, Math.min(st + dy, window.innerHeight - 46));
-                if (!_rafId) _rafId = requestAnimationFrame(flush);
+            if (!iconTarget.hasPointerCapture(e.pointerId)) return;
+            const r = iconTarget.getBoundingClientRect();
+            const dx = e.clientX - r.left - offsetX;
+            const dy = e.clientY - r.top - offsetY;
+            
+            if (!dragging && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+                dragging = true;
+                iconTarget.classList.add('scp-icon-dragging');
+            }
+
+            if (dragging) {
+                const viewportWidth = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+                const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+                
+                const x = Math.max(0, Math.min(viewportWidth - 46, e.clientX - offsetX)); // 46 = ширина иконки
+                const y = Math.max(0, Math.min(viewportHeight - 46, e.clientY - offsetY));
+                
+                iconTarget.style.left = `${x}px`;
+                iconTarget.style.top = `${y}px`;
+                iconTarget.style.bottom = 'auto';
+                iconTarget.style.right = 'auto';
             }
         });
 
-        iconTarget.addEventListener('pointerup', () => {
-            if (!active) return;
-            active = false;
+        iconTarget.addEventListener('pointerup', e => {
+            if (iconTarget.hasPointerCapture(e.pointerId)) {
+                iconTarget.releasePointerCapture(e.pointerId);
+            }
             iconTarget.classList.remove('scp-icon-dragging');
-            if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; flush(); }
-            if (moved) {
-                const s = getSettings();
-                const r = iconTarget.getBoundingClientRect();
-                s.iconX = r.left; s.iconY = r.top;
-                saveSettings();
+            
+            if (dragging) {
+                localStorage.setItem(ICON_STORAGE_KEY, JSON.stringify({
+                    left: iconTarget.style.left,
+                    top: iconTarget.style.top,
+                }));
+                dragging = false;
             } else {
                 toggleVisibility();
             }
         });
 
-        iconTarget.addEventListener('pointercancel', () => {
-            active = false; moved = false;
+        iconTarget.addEventListener('pointercancel', e => {
+            if (iconTarget.hasPointerCapture(e.pointerId)) {
+                iconTarget.releasePointerCapture(e.pointerId);
+            }
+            dragging = false;
             iconTarget.classList.remove('scp-icon-dragging');
-            if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
         });
 
         iconTarget.style.touchAction = 'none';
@@ -4031,7 +4665,7 @@
 
     function applyCustomTheme(theme) {
         if (!theme) return;
-        const targets = [windowEl, document.getElementById('scp-lb-overlay'), document.getElementById('scp-diff-modal'), document.getElementById('scp-settings-overlay')].filter(Boolean);
+        const targets = [windowEl, iconEl, document.getElementById('scp-lb-overlay'), document.getElementById('scp-diff-modal'), document.getElementById('scp-settings-overlay'), document.getElementById('scp-picker-overlay')].filter(Boolean);
         for (const [key, cssVar] of Object.entries(THEME_CSS_MAP)) {
             if (theme[key] !== undefined && theme[key] !== '') {
                 targets.forEach(t => t.style.setProperty(cssVar, theme[key]));
@@ -4047,6 +4681,14 @@
         const r = windowEl.getBoundingClientRect();
         s.windowX = r.left; s.windowY = r.top; s.windowW = r.width; s.windowH = r.height;
         saveSettings();
+    }
+
+    function _getViewportSize() {
+        const vv = window.visualViewport;
+        return {
+            w: vv ? vv.width : window.innerWidth,
+            h: vv ? vv.height : window.innerHeight,
+        };
     }
 
     function restoreWindowState() {
@@ -4068,16 +4710,46 @@
             windowEl.style.right = 'auto';
         }
         
-        if (iconEl && s.iconX !== null && s.iconY !== null) {
-            const maxIconLeft = Math.max(0, window.innerWidth - 46);
-            const maxIconTop = Math.max(0, window.innerHeight - 46);
-            iconEl.style.left = `${Math.max(0, Math.min(s.iconX, maxIconLeft))}px`;
-            iconEl.style.top = `${Math.max(0, Math.min(s.iconY, maxIconTop))}px`;
-            iconEl.style.right = 'auto';
-            iconEl.style.bottom = 'auto';
+        if (iconEl) {
+            const savedIconPos = localStorage.getItem(ICON_STORAGE_KEY);
+            let posValid = false;
+            const vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+            const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+            const iconSize = 46;
+
+            if (savedIconPos) {
+                try {
+                    const pos = JSON.parse(savedIconPos);
+                    const left = parseFloat(pos.left);
+                    const top = parseFloat(pos.top);
+                    if (!isNaN(left) && !isNaN(top) && left >= 0 && top >= 0 && left + iconSize <= vw && top + iconSize <= vh) {
+                        iconEl.style.left = `${left}px`;
+                        iconEl.style.top = `${top}px`;
+                        iconEl.style.bottom = 'auto';
+                        iconEl.style.right = 'auto';
+                        posValid = true;
+                    }
+                } catch {
+                    localStorage.removeItem(ICON_STORAGE_KEY);
+                }
+            }
+            
+            if (!posValid) {
+                // Явно вычисляем и задаём стартовую позицию через JS (left/top)
+                // чтобы избежать багов с позиционированием через right/bottom в мобильном Safari/Chrome
+                const defaultRight = isMobile ? 16 : 20;
+                const defaultBottom = isMobile ? 120 : 80;
+                iconEl.style.left = `${Math.max(0, vw - iconSize - defaultRight)}px`;
+                iconEl.style.top = `${Math.max(0, vh - iconSize - defaultBottom)}px`;
+                iconEl.style.bottom = 'auto';
+                iconEl.style.right = 'auto';
+            }
         }
         
-        if (!isMobile) {
+        if (isMobile) {
+            windowEl.style.width = `${Math.min(w, Math.floor(window.innerWidth * 0.94), 560)}px`;
+            windowEl.style.height = `${Math.min(h, Math.floor(window.innerHeight * 0.82), 700)}px`;
+        } else {
             windowEl.style.width = `${w}px`;
             windowEl.style.height = `${h}px`;
         }
@@ -4087,21 +4759,116 @@
 
     // ─── Visibility ─────────────────────────────────────────────────────────────
 
-    function minimize() { const s = getSettings(); s.minimized = true; windowEl.style.display = 'none'; iconEl.style.display = 'flex'; saveSettings(); }
-    function restoreFromMinimize() { const s = getSettings(); s.minimized = false; windowEl.style.display = 'flex'; iconEl.style.display = s.floatingIconPersistent ? 'flex' : 'none'; saveSettings(); scrollToBottom(); }
-    function hideWindow() { const s = getSettings(); s.windowVisible = false; s.minimized = false; windowEl.style.display = 'none'; const isTouchDevice = 'ontouchstart' in window; iconEl.style.display = (s.floatingIconPersistent || isTouchDevice) ? 'flex' : 'none'; saveSettings(); }
+    function updateIconVisibility() {
+        if (!iconEl) return;
+        const s = getSettings();
+        
+        if (!s.enabled) {
+            iconEl.style.setProperty('display', 'none', 'important');
+            return;
+        }
+        
+        const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        
+        // Показываем если: закрыто, свернуто, persistent ИЛИ это мобилка
+        if (!s.windowVisible || s.minimized || s.floatingIconPersistent || isTouchDevice) {
+            iconEl.style.setProperty('display', 'flex', 'important');
+        } else {
+            iconEl.style.setProperty('display', 'none', 'important');
+        }
+    }
+
+    function minimize() { 
+        setGhostMode(false); 
+        const s = getSettings(); 
+        s.minimized = true; 
+        windowEl.style.display = 'none'; 
+        saveSettings(); 
+        updateIconVisibility();
+    }
+    
+    function restoreFromMinimize() { 
+        const s = getSettings(); 
+        s.minimized = false; 
+        windowEl.style.display = 'flex'; 
+        saveSettings(); 
+        updateIconVisibility();
+        scrollToBottom(); 
+    }
+    
+    function hideWindow() { 
+        setGhostMode(false); 
+        const s = getSettings(); 
+        s.windowVisible = false; 
+        s.minimized = false; 
+        windowEl.style.display = 'none'; 
+        saveSettings(); 
+        updateIconVisibility();
+    }
+    
     function showWindow() {
         const s = getSettings(); 
         if (!s.enabled) { toastr.warning('ST-Copilot is disabled.', EXT_DISPLAY); return; }
-        s.windowVisible = true; s.minimized = false;
+        s.windowVisible = true; 
+        s.minimized = false;
         windowEl.style.display = 'flex';
-        iconEl.style.display = s.floatingIconPersistent ? 'flex' : 'none';
-        saveSettings(); scrollToBottom();
+        saveSettings(); 
+        updateIconVisibility();
+        scrollToBottom();
     }
+    
     function toggleVisibility() {
         const s = getSettings();
         if (!s.windowVisible || s.minimized) { showWindow(); return; }
         if (s.floatingIconPersistent) { hideWindow(); } else { minimize(); }
+    }
+
+    // ─── Ghost Mode ──────────────────────────────────────────────────────────────
+
+    let _ghostModeActive = false;
+    let _ghostHotkeyHandler = null;
+
+    function setGhostMode(enabled) {
+        _ghostModeActive = enabled;
+        if (!windowEl) return;
+        const s = getSettings();
+        const ghostBtn = document.getElementById('scp-ghost-btn');
+
+        if (enabled) {
+            const opacity = Math.max(15, Math.min(50, s.ghostModeOpacity ?? 15)) / 100;
+            windowEl.classList.add('scp-ghost-mode');
+            windowEl.style.opacity = opacity.toString();
+            ghostBtn?.classList.add('active');
+        } else {
+            windowEl.classList.remove('scp-ghost-mode');
+            windowEl.style.opacity = ((s.opacity ?? 95) / 100).toString();
+            ghostBtn?.classList.remove('active');
+        }
+    }
+
+    function toggleGhostMode() {
+        if (!windowEl || windowEl.style.display === 'none') return;
+        setGhostMode(!_ghostModeActive);
+    }
+
+    function setupGhostHotkey() {
+        if (_ghostHotkeyHandler) document.removeEventListener('keydown', _ghostHotkeyHandler);
+        _ghostHotkeyHandler = null;
+        const s = getSettings();
+        if (!s.ghostModeHotkeyEnabled || !s.ghostModeHotkey) return;
+        const parts = s.ghostModeHotkey.toLowerCase().split('+').map(p => p.trim());
+        const key = parts[parts.length - 1];
+        const needAlt = parts.includes('alt');
+        const needCtrl = parts.includes('ctrl') || parts.includes('control');
+        const needShift = parts.includes('shift');
+        const needMeta = parts.includes('meta') || parts.includes('cmd');
+        _ghostHotkeyHandler = e => {
+            if (e.key.toLowerCase() !== key) return;
+            if (needAlt !== e.altKey || needCtrl !== e.ctrlKey || needShift !== e.shiftKey || needMeta !== e.metaKey) return;
+            e.preventDefault();
+            toggleGhostMode();
+        };
+        document.addEventListener('keydown', _ghostHotkeyHandler);
     }
 
     // ─── Hotkey ─────────────────────────────────────────────────────────────────
@@ -4149,11 +4916,55 @@
             const item = document.createElement('div');
             item.className = `scp-sess-item${sess.id === bucket.activeSessionId ? ' active' : ''}`;
             item.dataset.id = sess.id;
-            item.innerHTML = `
-                <span class="scp-sess-item-dot"></span>
-                <span class="scp-sess-item-name">${escHtml(sess.name)}</span>
-                <span class="scp-sess-item-count">${sess.messages.length}</span>`;
-            item.addEventListener('click', () => {
+
+            const dot = document.createElement('span');
+            dot.className = 'scp-sess-item-dot';
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'scp-sess-item-name';
+            nameSpan.textContent = sess.name;
+
+            const count = document.createElement('span');
+            count.className = 'scp-sess-item-count';
+            count.textContent = sess.messages.length;
+
+            item.appendChild(dot);
+            item.appendChild(nameSpan);
+            item.appendChild(count);
+
+            if (sess.isTemporary) {
+                const badge = document.createElement('span');
+                badge.className = 'scp-sess-tmp-badge';
+                badge.title = 'Temporary session — will be deleted on switch';
+                badge.textContent = 'tmp';
+                item.appendChild(badge);
+            }
+
+            // Toggle tmp/permanent button (only for active session)
+            if (sess.id === bucket.activeSessionId) {
+                const tmpBtn = document.createElement('button');
+                tmpBtn.className = `scp-sess-tmp-btn${sess.isTemporary ? ' active' : ''}`;
+                tmpBtn.title = sess.isTemporary ? 'Make permanent' : 'Make temporary';
+                tmpBtn.innerHTML = '⏱';
+                tmpBtn.addEventListener('click', e => {
+                    e.stopPropagation();
+                    sess.isTemporary = !sess.isTemporary;
+                    saveSettings();
+                    refreshSessionDropdown();
+                });
+                item.appendChild(tmpBtn);
+            }
+
+            item.addEventListener('click', async () => {
+                const activeSess = bucket.sessions.find(s => s.id === bucket.activeSessionId);
+                if (activeSess && activeSess.isTemporary && activeSess.id !== sess.id) {
+                    const ok = await showCustomDialog({
+                        type: 'confirm',
+                        title: 'Delete Temporary Session?',
+                        message: 'Your current session is temporary. Switching will permanently delete it. Continue?'
+                    });
+                    if (!ok) return;
+                }
                 setActiveSession(charId, chatId, sess.id);
                 refreshSessionDropdown(); renderSession(getCurrentSession()); closeSessPanel();
             });
@@ -4663,11 +5474,23 @@
         setC('scp-include-charcard', 'includeCharacterCard');
         setC('scp-include-persona', 'includeUserPersonality');
         setC('scp-icon-persistent', 'floatingIconPersistent');
+        setC('scp-ghost-hotkey-enabled', 'ghostModeHotkeyEnabled');
         setI('scp-hotkey', 'hotkey');
         setI('scp-max-tokens', 'maxTokens');
         setI('scp-history-limit', 'localHistoryLimit');
         setI('scp-depth-slider', 'contextDepth');
         setI('scp-reasoning-trim', 'reasoningTrimStrings');
+        setI('scp-ghost-hotkey', 'ghostModeHotkey');
+
+        const opSlider = $('scp-opacity-slider');
+        const opVal = $('scp-opacity-val');
+        if (opSlider) opSlider.value = s.opacity ?? 95;
+        if (opVal) opVal.textContent = `${s.opacity ?? 95}%`;
+
+        const ghOp = $('scp-ghost-opacity');
+        const ghOpVal = $('scp-ghost-opacity-val');
+        if (ghOp) ghOp.value = s.ghostModeOpacity ?? 15;
+        if (ghOpVal) ghOpVal.textContent = `${s.ghostModeOpacity ?? 15}%`;
         
         const dv = $('scp-depth-val');
         if (dv) dv.textContent = s.contextDepth ?? 15;
@@ -4735,22 +5558,55 @@
             const btn = $('scp-wand-btn');
             if (btn) btn.style.display = ss.enabled ? '' : 'none';
             if (!ss.enabled) hideWindow();
+            updateIconVisibility();
             setupHotkey();
         });
+        
         bindCheck('scp-hotkey-enabled', 'hotkeyEnabled');
         bindCheck('scp-include-sysprompt', 'includeSystemPrompt', updCtx);
         bindCheck('scp-include-anote', 'includeAuthorsNote', updCtx);
         bindCheck('scp-include-charcard', 'includeCharacterCard', updCtx);
         bindCheck('scp-include-persona', 'includeUserPersonality', updCtx);
-        bindCheck('scp-icon-persistent', 'floatingIconPersistent', () => {
-            const ss = getSettings();
-            const isTouchDevice = 'ontouchstart' in window;
-            if (ss.floatingIconPersistent || ss.minimized || (!ss.windowVisible && isTouchDevice)) {
-                if (iconEl) iconEl.style.display = 'flex';
-            } else {
-                if (iconEl) iconEl.style.display = 'none';
-            }
-        });
+        
+        bindCheck('scp-icon-persistent', 'floatingIconPersistent', updateIconVisibility);
+
+        // Opacity slider (ST drawer)
+        const opSlider = $('scp-opacity-slider');
+        const opVal = $('scp-opacity-val');
+        if (opSlider) {
+            opSlider.value = s.opacity ?? 95;
+            if (opVal) opVal.textContent = `${opSlider.value}%`;
+            opSlider.addEventListener('input', () => { if (opVal) opVal.textContent = `${opSlider.value}%`; });
+            opSlider.addEventListener('change', () => {
+                const v = parseInt(opSlider.value);
+                getSettings().opacity = v; saveSettings();
+                if (!_ghostModeActive && windowEl) windowEl.style.opacity = (v / 100).toString();
+                const spOpSlider = document.getElementById('scp-sp-opacity-slider');
+                const spOpVal = document.getElementById('scp-sp-opacity-val');
+                if (spOpSlider) spOpSlider.value = v;
+                if (spOpVal) spOpVal.textContent = `${v}%`;
+            });
+        }
+
+        // Ghost mode (ST drawer)
+        const ghOp = $('scp-ghost-opacity');
+        const ghOpVal = $('scp-ghost-opacity-val');
+        if (ghOp) {
+            ghOp.value = s.ghostModeOpacity ?? 15;
+            if (ghOpVal) ghOpVal.textContent = `${ghOp.value}%`;
+            ghOp.addEventListener('input', () => { if (ghOpVal) ghOpVal.textContent = `${ghOp.value}%`; });
+            ghOp.addEventListener('change', () => {
+                const v = parseInt(ghOp.value);
+                getSettings().ghostModeOpacity = v; saveSettings();
+                if (_ghostModeActive && windowEl) windowEl.style.opacity = (v / 100).toString();
+                const spGhOp = document.getElementById('scp-sp-ghost-opacity');
+                const spGhOpVal = document.getElementById('scp-sp-ghost-opacity-val');
+                if (spGhOp) spGhOp.value = v;
+                if (spGhOpVal) spGhOpVal.textContent = `${v}%`;
+            });
+        }
+        bindCheck('scp-ghost-hotkey-enabled', 'ghostModeHotkeyEnabled', setupGhostHotkey);
+        bindInput('scp-ghost-hotkey', 'ghostModeHotkey', null, setupGhostHotkey);
 
         const reasoningTrimEl = $('scp-reasoning-trim');
         if (reasoningTrimEl) {
@@ -4934,8 +5790,12 @@
         applyCustomTheme(getSettings().customTheme || THEME_PRESETS.default);
         syncSPFromSettings();
         buildThemeEditor(document.getElementById('scp-sp-theme-section'));
+        buildQPSettingsUI(document.getElementById('scp-sp-qp-container'));
         overlay.style.display = 'flex';
         updateSessionOverrideIndicator();
+        // Reset to global tab on open
+        overlay.querySelectorAll('.scp-sp-tab').forEach(t => t.classList.toggle('active', t.dataset.sptab === 'global'));
+        overlay.querySelectorAll('.scp-sp-tab-pane').forEach(p => { p.style.display = p.id === 'scp-sp-pane-global' ? '' : 'none'; });
     }
 
     function closeSettingsPanel() {
@@ -4958,6 +5818,18 @@
         gC('scp-sp-hotkey-enabled', s.hotkeyEnabled);
         g('scp-sp-hotkey', s.hotkey);
         gC('scp-sp-icon-persistent', s.floatingIconPersistent);
+
+        const spOpSlider = document.getElementById('scp-sp-opacity-slider');
+        const spOpVal = document.getElementById('scp-sp-opacity-val');
+        if (spOpSlider) spOpSlider.value = s.opacity ?? 95;
+        if (spOpVal) spOpVal.textContent = `${s.opacity ?? 95}%`;
+
+        const spGhOp = document.getElementById('scp-sp-ghost-opacity');
+        const spGhOpVal = document.getElementById('scp-sp-ghost-opacity-val');
+        if (spGhOp) spGhOp.value = s.ghostModeOpacity ?? 15;
+        if (spGhOpVal) spGhOpVal.textContent = `${s.ghostModeOpacity ?? 15}%`;
+        gC('scp-sp-ghost-hotkey-enabled', s.ghostModeHotkeyEnabled);
+        g('scp-sp-ghost-hotkey', s.ghostModeHotkey);
         g('scp-sp-conn-source', s.connectionSource ?? 'default');
         const gCp = document.getElementById('scp-sp-global-profile-group');
         if (gCp) gCp.style.display = s.connectionSource === 'profile' ? '' : 'none';
@@ -5073,7 +5945,9 @@
 
         // Close
         document.getElementById('scp-sp-close')?.addEventListener('click', closeSettingsPanel);
-        overlay.addEventListener('click', e => { if (e.target === overlay) closeSettingsPanel(); });
+        let _spMouseDown = null;
+        overlay.addEventListener('mousedown', e => { _spMouseDown = e.target; });
+        overlay.addEventListener('click', e => { if (e.target === overlay && _spMouseDown === overlay) closeSettingsPanel(); });
 
         // Tab switching
         overlay.querySelectorAll('.scp-sp-tab').forEach(tab => {
@@ -5083,6 +5957,9 @@
                 tab.classList.add('active');
                 const pane = document.getElementById(`scp-sp-pane-${tab.dataset.sptab}`);
                 if (pane) pane.style.display = '';
+                if (tab.dataset.sptab === 'stats') {
+                    renderStatsPane(document.getElementById('scp-sp-stats-container'));
+                }
             });
         });
 
@@ -5100,7 +5977,9 @@
                 includeUserPersonality:'scp-include-persona', reasoningTrimStrings:'scp-reasoning-trim',
                 systemPrompt:'scp-sysprompt', lorebookManagePrompt:'scp-lb-manage-prompt',
                 lorebookSTScanDepth:'scp-lb-st-scan-depth', lorebookCopilotScanDepth:'scp-lb-copilot-scan-depth',
-                connectionProfileId:'scp-conn-profile'
+                connectionProfileId:'scp-conn-profile',
+                opacity:'scp-opacity-slider', ghostModeOpacity:'scp-ghost-opacity',
+                ghostModeHotkeyEnabled:'scp-ghost-hotkey-enabled', ghostModeHotkey:'scp-ghost-hotkey',
             }[key]);
             if (stEl) {
                 if (stEl.type === 'checkbox') stEl.checked = !!val;
@@ -5135,19 +6014,43 @@
             const btn = document.getElementById('scp-wand-btn');
             if (btn) btn.style.display = ss.enabled ? '' : 'none';
             if (!ss.enabled) hideWindow();
+            updateIconVisibility();
             setupHotkey();
         });
+        
         bGCheck('scp-sp-hotkey-enabled', 'hotkeyEnabled', setupHotkey);
         bGInput('scp-sp-hotkey', 'hotkey', null, setupHotkey);
-        bGCheck('scp-sp-icon-persistent', 'floatingIconPersistent', () => {
-            const ss = getSettings();
-            const isTouchDevice = 'ontouchstart' in window;
-            if (ss.floatingIconPersistent || ss.minimized || (!ss.windowVisible && isTouchDevice)) {
-                if (iconEl) iconEl.style.display = 'flex';
-            } else {
-                if (iconEl) iconEl.style.display = 'none';
-            }
-        });
+        
+        bGCheck('scp-sp-icon-persistent', 'floatingIconPersistent', updateIconVisibility);
+
+        // Window opacity (moved from header)
+        const spOpSlider = document.getElementById('scp-sp-opacity-slider');
+        const spOpVal = document.getElementById('scp-sp-opacity-val');
+        if (spOpSlider) {
+            spOpSlider.addEventListener('input', () => { if (spOpVal) spOpVal.textContent = `${spOpSlider.value}%`; });
+            spOpSlider.addEventListener('change', () => {
+                const v = parseInt(spOpSlider.value);
+                saveGlobal('opacity', v, () => {
+                    if (!_ghostModeActive && windowEl) windowEl.style.opacity = (v / 100).toString();
+                });
+            });
+        }
+
+        // Ghost mode settings
+        bGCheck('scp-sp-ghost-hotkey-enabled', 'ghostModeHotkeyEnabled', setupGhostHotkey);
+        bGInput('scp-sp-ghost-hotkey', 'ghostModeHotkey', null, setupGhostHotkey);
+
+        const spGhOp = document.getElementById('scp-sp-ghost-opacity');
+        const spGhOpVal = document.getElementById('scp-sp-ghost-opacity-val');
+        if (spGhOp) {
+            spGhOp.addEventListener('input', () => { if (spGhOpVal) spGhOpVal.textContent = `${spGhOp.value}%`; });
+            spGhOp.addEventListener('change', () => {
+                const v = parseInt(spGhOp.value);
+                saveGlobal('ghostModeOpacity', v, () => {
+                    if (_ghostModeActive && windowEl) windowEl.style.opacity = (v / 100).toString();
+                });
+            });
+        }
 
         bGSelect('scp-sp-conn-source', 'connectionSource', v => {
             const gCp = document.getElementById('scp-sp-global-profile-group');
@@ -5410,19 +6313,39 @@
         makeResizable(windowEl);
 
         window.addEventListener('resize', () => {
-            if (!windowEl || windowEl.style.display === 'none') return;
-            const r = windowEl.getBoundingClientRect();
-            let changed = false;
-            let newX = r.left, newY = r.top;
+            if (windowEl && windowEl.style.display !== 'none') {
+                const r = windowEl.getBoundingClientRect();
+                let changed = false;
+                let newX = r.left, newY = r.top;
+                
+                if (r.right > window.innerWidth) { newX = Math.max(0, window.innerWidth - r.width); changed = true; }
+                if (r.bottom > window.innerHeight && r.top > 50) { newY = Math.max(0, window.innerHeight - r.height); changed = true; }
+                
+                if (changed) {
+                    windowEl.style.left = `${newX}px`; windowEl.style.top = `${newY}px`;
+                    const s = getSettings();
+                    s.windowX = newX; s.windowY = newY;
+                    saveSettings();
+                }
+            }
             
-            if (r.right > window.innerWidth) { newX = Math.max(0, window.innerWidth - r.width); changed = true; }
-            if (r.bottom > window.innerHeight && r.top > 50) { newY = Math.max(0, window.innerHeight - r.height); changed = true; }
-            
-            if (changed) {
-                windowEl.style.left = `${newX}px`; windowEl.style.top = `${newY}px`;
-                const s = getSettings();
-                s.windowX = newX; s.windowY = newY;
-                saveSettings();
+            if (iconEl && iconEl.style.display !== 'none') {
+                const vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+                const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+                const iconSize = 46;
+                let curLeft = parseFloat(iconEl.style.left);
+                let curTop = parseFloat(iconEl.style.top);
+                
+                if (!isNaN(curLeft) && !isNaN(curTop)) {
+                    let newLeft = Math.max(0, Math.min(curLeft, vw - iconSize));
+                    let newTop = Math.max(0, Math.min(curTop, vh - iconSize));
+                    
+                    if (newLeft !== curLeft || newTop !== curTop) {
+                        iconEl.style.left = `${newLeft}px`;
+                        iconEl.style.top = `${newTop}px`;
+                        localStorage.setItem(ICON_STORAGE_KEY, JSON.stringify({ left: `${newLeft}px`, top: `${newTop}px` }));
+                    }
+                }
             }
         });
 
@@ -5431,23 +6354,9 @@
         $('scp-ext-settings-btn')?.addEventListener('click', openExtensionSettings);
         if (iconEl) makeIconDraggable(iconEl);
 
-        // Opacity
-        $('scp-opacity-btn')?.addEventListener('click', e => { e.stopPropagation(); $('scp-opacity-pop')?.classList.toggle('visible'); });
-        document.addEventListener('click', e => {
-            const pop = $('scp-opacity-pop');
-            if (pop && !pop.contains(e.target) && e.target !== $('scp-opacity-btn')) pop.classList.remove('visible');
-        });
-        const opSlider = $('scp-opacity-slider');
-        if (opSlider) {
-            opSlider.value = getSettings().opacity || 95;
-            $('scp-opacity-val').textContent = `${opSlider.value}%`;
-            opSlider.addEventListener('input', () => {
-                const v = parseInt(opSlider.value);
-                $('scp-opacity-val').textContent = `${v}%`;
-                windowEl.style.opacity = (v / 100).toString();
-                getSettings().opacity = v; saveSettings();
-            });
-        }
+        // Ghost mode
+        $('scp-ghost-btn')?.addEventListener('click', toggleGhostMode);
+
 
         // Session dropdown
         $('scp-sess-trigger')?.addEventListener('click', e => {
@@ -5471,10 +6380,21 @@
             closeSessPanel();
             const { charId, chatId } = getBindingKey();
             const bucket = getChatBucket(charId, chatId);
+
+            const activeSess = bucket.sessions.find(s => s.id === bucket.activeSessionId);
+            if (activeSess && activeSess.isTemporary) {
+                const ok = await showCustomDialog({
+                    type: 'confirm',
+                    title: 'Delete Temporary Session?',
+                    message: 'Your current session is temporary. Creating a new one will permanently delete it. Continue?'
+                });
+                if (!ok) return;
+            }
+
             const defaultName = `Session ${bucket.sessions.length + 1}`;
-            const name = await showCustomDialog({ type: 'prompt', title: 'New Session', message: 'Session name:', defaultValue: defaultName, placeholder: defaultName });
-            if (name === null) return; // user cancelled — do NOT create
-            createSession(charId, chatId, name.trim() || defaultName);
+            const result = await showSessionDialog({ defaultName });
+            if (result === null) return;
+            createSession(charId, chatId, result.name.trim() || defaultName, result.isTemporary);
             refreshSessionDropdown(); renderSession(getCurrentSession());
         });
 
@@ -5532,6 +6452,28 @@
 
         // Search
         $('scp-search-btn')?.addEventListener('click', () => { _searchOpen ? closeSearch() : openSearch(); });
+
+        // Chat Message Picker
+        $('scp-pick-btn')?.addEventListener('click', openChatPicker);
+
+        // Quick Prompts toggle
+        $('scp-qp-toggle-btn')?.addEventListener('click', () => {
+            const s = getSettings();
+            s.quickPromptsVisible = !s.quickPromptsVisible;
+            saveSettings(); renderQuickPromptsBar();
+        });
+
+        // Desktop horizontal scroll for QP bar (wheel → scrollLeft)
+        const qpBar = $('scp-qp-bar');
+        if (qpBar) {
+            qpBar.addEventListener('wheel', e => {
+                if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return; // already horizontal native scroll
+                e.preventDefault();
+                // Normalize: deltaMode 0=px, 1=line(~20px), 2=page
+                const delta = e.deltaMode === 1 ? e.deltaY * 20 : e.deltaMode === 2 ? e.deltaY * 200 : e.deltaY;
+                qpBar.scrollLeft += delta;
+            }, { passive: false });
+        }
         $('scp-search-close')?.addEventListener('click', closeSearch);
         $('scp-search-prev')?.addEventListener('click', () => navigateSearch(-1));
         $('scp-search-next')?.addEventListener('click', () => navigateSearch(1));
@@ -5583,7 +6525,9 @@
 
         // Modal
         $('scp-modal-close')?.addEventListener('click', () => { modalEl.style.display = 'none'; });
-        modalEl?.addEventListener('click', e => { if (e.target === modalEl) modalEl.style.display = 'none'; });
+        let _modalMouseDown = null;
+        modalEl?.addEventListener('mousedown', e => { _modalMouseDown = e.target; });
+        modalEl?.addEventListener('click', e => { if (e.target === modalEl && _modalMouseDown === modalEl) modalEl.style.display = 'none'; });
         document.querySelectorAll('.scp-modal-tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 document.querySelectorAll('.scp-modal-tab').forEach(t => t.classList.remove('active'));
@@ -5611,6 +6555,8 @@
         autoLoadBoundProfile();
         updateSessionOverrideIndicator();
         updateDepthSlidersMax();
+        renderQuickPromptsBar();
+        updatePickBtnState();
     }
 
     // ─── Wand Button ─────────────────────────────────────────────────────────────
@@ -5632,7 +6578,7 @@
     async function init() {
         try { ST_WorldInfo = await import('/scripts/world-info.js'); } catch(e) { console.warn('ST-Copilot: Could not import world-info.js'); }
         try { ST_Utils = await import('/scripts/utils.js'); } catch(e) { console.warn('ST-Copilot: Could not import utils.js'); }
-        getSettings(); injectUI();
+        getSettings(); await injectUI();
         const ctx = SillyTavern.getContext();
         const container = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
         if (container) {
@@ -5641,13 +6587,18 @@
                 if (html) container.insertAdjacentHTML('beforeend', html);
             } catch (e) {}
         }
-        restoreWindowState(); attachWindowListeners(); setupSettingsHandlers(); setupLorebookManagerListeners(); setupSettingsPanelListeners();
+        restoreWindowState(); attachWindowListeners(); setupSettingsHandlers(); setupLorebookManagerListeners(); setupSettingsPanelListeners(); setupChatPickerListeners();
+        
         const s = getSettings();
-        if (s.windowVisible) {
-            if (s.minimized) iconEl.style.display = 'flex';
-            else windowEl.style.display = 'flex';
+        
+        if (s.windowVisible && !s.minimized) {
+            windowEl.style.display = 'flex';
+        } else {
+            windowEl.style.display = 'none';
         }
-        if (s.floatingIconPersistent) iconEl.style.display = 'flex';
+        
+        updateIconVisibility();
+        
         onChatChanged();
         const es = ctx.eventSource || window.eventSource;
         const et = ctx.event_types || window.event_types || {};
@@ -5670,7 +6621,38 @@
             });
         }
         
-        setupHotkey(); addWandButton();
+        setupHotkey(); setupGhostHotkey(); addWandButton();
+
+        window.addEventListener('message', e => {
+            if (!e.data || typeof e.data !== 'object') return;
+            if (e.data.type === 'scp-iframe-h') {
+                document.querySelectorAll('.scp-html-block-iframe').forEach(f => {
+                    try {
+                        if (f.contentWindow === e.source) {
+                            f.style.height = `${Math.max(40, Math.min(1200, e.data.h + 16))}px`;
+                        }
+                    } catch(_) {}
+                });
+            } else if (e.data.type === 'scp-iframe-bg') {
+                document.querySelectorAll('.scp-html-block-iframe').forEach(f => {
+                    try {
+                        if (f.contentWindow === e.source) {
+                            f.style.background = e.data.hasBg ? 'transparent' : '#ffffff';
+                        }
+                    } catch(_) {}
+                });
+            } else if (e.data.type === 'scp-iframe-err') {
+                document.querySelectorAll('.scp-html-block-iframe').forEach(f => {
+                    try {
+                        if (f.contentWindow === e.source) {
+                            const errEl = f.closest('.scp-html-block')?.querySelector('.scp-html-block-error');
+                            if (errEl) { errEl.textContent = `⚠ ${e.data.msg}`; errEl.style.display = ''; }
+                        }
+                    } catch(_) {}
+                });
+            }
+        });
+
         console.log(`[${EXT_DISPLAY}] Initialized.`);
     }
 

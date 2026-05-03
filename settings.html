@@ -26,6 +26,13 @@
                         </label>
                         <input id="scp-hotkey" type="text" class="text_pole" placeholder="e.g. Alt+Shift+C" style="margin-top:5px" />
                     </div>
+                    <div style="margin-top:10px">
+                        <b style="font-size:12px">Window Opacity</b>
+                        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+                            <input type="range" id="scp-opacity-slider" class="neo-range-slider" min="20" max="100" style="flex:1">
+                            <span id="scp-opacity-val" style="font-size:12px;min-width:34px;text-align:right;color:var(--SmartThemeQuoteColor,#a99bfb)">95%</span>
+                        </div>
+                    </div>
                     <div style="margin-top:10px; display:flex; gap:6px">
                         <button id="scp-open-window" class="menu_button interactable" style="flex:1">
                             <i class="fa-solid fa-robot"></i> Open Copilot
@@ -33,6 +40,29 @@
                         <button id="scp-clear-sessions" class="menu_button interactable" style="flex:1">
                             <i class="fa-solid fa-broom"></i> Clear Sessions
                         </button>
+                    </div>
+                </div>
+
+                <!-- ── Ghost Mode ──────────────────────────────── -->
+                <div class="scp-settings-flat-section">
+                    <div class="scp-settings-flat-title"><i class="fa-solid fa-ghost"></i> Ghost Mode</div>
+                    <label style="font-size:11px; color:#888; display:block; margin-bottom:8px">
+                        Makes the window transparent and lets clicks through.
+                    </label>
+                    <div>
+                        <b style="font-size:12px">Ghost Opacity</b>
+                        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+                            <input type="range" id="scp-ghost-opacity" class="neo-range-slider" min="15" max="50" style="flex:1">
+                            <span id="scp-ghost-opacity-val" style="font-size:12px;min-width:34px;text-align:right;color:var(--SmartThemeQuoteColor,#a99bfb)">15%</span>
+                        </div>
+                    </div>
+                    <div style="margin-top:10px">
+                        <b style="font-size:12px">Ghost Mode Shortcut</b>
+                        <label class="checkbox_label" style="margin-top:6px">
+                            <input id="scp-ghost-hotkey-enabled" type="checkbox" />
+                            <span>Enable ghost mode shortcut</span>
+                        </label>
+                        <input id="scp-ghost-hotkey" type="text" class="text_pole" placeholder="e.g. Alt+Shift+G" style="margin-top:5px" />
                     </div>
                 </div>
 
@@ -131,9 +161,9 @@
                         </button>
                         <div style="margin-top:14px; border-top:1px solid rgba(255,255,255,.06); padding-top:12px">
                             <b style="font-size:12px">Keyword Scan Depth</b>
-                            <label style="font-size:11px; color:#888; display:block; margin:8px 0 3px">Main chat messages to scan</label>
+                            <label style="font-size:11px; color:#888; display:block; margin:8px 0 3px">Main chat keytriggers scan depth</label>
                             <input id="scp-lb-st-scan-depth" type="number" class="text_pole" placeholder="5" min="0" max="200" />
-                            <label style="font-size:11px; color:#888; display:block; margin:8px 0 3px">Copilot messages to scan</label>
+                            <label style="font-size:11px; color:#888; display:block; margin:8px 0 3px">Copilot keytriggers scan depth</label>
                             <input id="scp-lb-copilot-scan-depth" type="number" class="text_pole" placeholder="6" min="0" max="200" />
                         </div>
                     </div>

@@ -1,0 +1,110 @@
+<div id="scp-window" class="scp-window" style="display:none">
+    <div class="scp-rh scp-rh-n"></div><div class="scp-rh scp-rh-e"></div>
+    <div class="scp-rh scp-rh-s"></div><div class="scp-rh scp-rh-w"></div>
+    <div class="scp-rh scp-rh-ne"></div><div class="scp-rh scp-rh-se"></div>
+    <div class="scp-rh scp-rh-sw"></div><div class="scp-rh scp-rh-nw"></div>
+
+    <div class="scp-header" id="scp-drag-handle">
+        <div class="scp-header-left">
+            <span class="scp-logo">${I.bot}</span>
+            <span class="scp-title">ST-Copilot</span>
+            <span class="scp-char-badge" id="scp-char-badge"></span>
+        </div>
+        <div class="scp-header-right">
+            <button class="scp-hbtn scp-search-hbtn" id="scp-search-btn" title="Search in chat (Ctrl+F)">${I.search}</button>
+            <button class="scp-hbtn scp-hbtn-ghost" id="scp-ghost-btn" title="Toggle Ghost Mode — transparent & click-through">${I.ghost}</button>
+            <button class="scp-hbtn scp-hbtn-gear" id="scp-ext-settings-btn" title="Settings">${I.gear}<span class="scp-gear-ov-dot" id="scp-gear-ov-dot" style="display:none"></span></button>
+            <button class="scp-hbtn" id="scp-min-btn" title="Minimize to icon">${I.minus}</button>
+            <button class="scp-hbtn scp-hbtn-close" id="scp-close-btn" title="Hide">${I.x}</button>
+        </div>
+    </div>
+
+    <div class="scp-toolbar">
+        <div class="scp-sess-wrap">
+            <div class="scp-sess-dropdown" id="scp-sess-dropdown">
+                <button class="scp-sess-trigger" id="scp-sess-trigger">
+                    <span class="scp-sess-trigger-name" id="scp-sess-name">Session</span>
+                    ${I.chevron}
+                </button>
+                <div class="scp-sess-panel" id="scp-sess-panel">
+                    <div class="scp-sess-list" id="scp-sess-list"></div>
+                    <div class="scp-sess-footer">
+                        <button class="scp-sess-new-btn" id="scp-new-sess-btn">
+                            ${I.plus}<span>New Session</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <button class="scp-tbtn" id="scp-rename-sess-btn" title="Rename session">${I.edit}</button>
+            <button class="scp-tbtn scp-tbtn-danger" id="scp-del-sess-btn" title="Delete session">${I.trash}</button>
+        </div>
+        <div class="scp-toolbar-sep"></div>
+        <label class="scp-depth-label" title="Main chat messages injected into each request">Ctx</label>
+        <input type="range" id="scp-depth-slider" class="scp-slider scp-depth-slider" min="0" max="100" step="1" value="15">
+        <span class="scp-depth-val scp-depth-clickable" id="scp-depth-val" title="Click to enter exact value">15</span>
+        <div class="scp-toolbar-sep"></div>
+        <button class="scp-tbtn" id="scp-lb-btn" title="Lorebook Manager">${I.book}</button>
+        <div class="scp-pick-wrap">
+            <button class="scp-tbtn" id="scp-pick-btn" title="Pick specific chat messages for context (replaces Ctx slider)">${I.pick}</button>
+            <span class="scp-pick-badge" id="scp-pick-badge" style="display:none"></span>
+        </div>
+    </div>
+
+    <div class="scp-search-bar" id="scp-search-bar">
+        <span class="scp-search-bar-icon">${I.search}</span>
+        <input type="text" id="scp-search-input" class="scp-search-input" placeholder="Search messages…" autocomplete="off" spellcheck="false">
+        <button class="scp-search-nav scp-search-word-btn" id="scp-search-word" title="Whole word">W</button>
+        <span class="scp-search-count" id="scp-search-count"></span>
+        <button class="scp-search-nav" id="scp-search-prev" title="Previous (Shift+Enter)">↑</button>
+        <button class="scp-search-nav" id="scp-search-next" title="Next (Enter)">↓</button>
+        <button class="scp-search-close-btn" id="scp-search-close" title="Close">✕</button>
+    </div>
+
+    <div class="scp-messages" id="scp-messages"></div>
+
+    <div class="scp-thinking-bar" id="scp-thinking-bar" style="display:none">
+        <div class="scp-dots"><span></span><span></span><span></span></div>
+        <span id="scp-thinking-text">Thinking…</span>
+        <button class="scp-stop-btn" id="scp-stop-btn" title="Abort">${I.stop}</button>
+    </div>
+
+    <div class="scp-actions-bar">
+        <button class="scp-action-btn" id="scp-inspect-btn" title="View raw context payload">${I.search}<span>Context</span></button>
+        <button class="scp-action-btn" id="scp-regen-btn" title="Regenerate last response">${I.refresh}<span>Regen</span></button>
+        <button class="scp-action-btn scp-qp-toggle-action" id="scp-qp-toggle-btn" title="Quick Prompts">${I.lightning}</button>
+        <div class="scp-flex-grow"></div>
+        <span class="scp-token-count" id="scp-token-count" title="Estimated payload tokens"></span>
+        <span class="scp-msg-count" id="scp-msg-count"></span>
+    </div>
+
+    <div class="scp-qp-bar" id="scp-qp-bar"></div>
+
+    <div class="scp-input-row">
+        <textarea id="scp-input" class="scp-input" placeholder="Ask about the roleplay…" rows="1"></textarea>
+        <button class="scp-send-btn" id="scp-send-btn" title="Send (Enter)">${I.send}</button>
+    </div>
+</div>
+
+<div id="scp-dock-icon" class="scp-dock-icon" style="display:none" title="ST-Copilot — click to restore">
+    ${I.bot}<span class="scp-dock-pulse"></span>
+</div>
+
+<div id="scp-ctx-modal" class="scp-modal-overlay" style="display:none">
+    <div class="scp-modal">
+        <div class="scp-modal-header">
+            <span>${I.search} Raw Context Payload</span>
+            <button class="scp-hbtn scp-hbtn-close" id="scp-modal-close">${I.x}</button>
+        </div>
+        <div class="scp-modal-tabs">
+            <button class="scp-modal-tab active" data-tab="formatted">Formatted</button>
+            <button class="scp-modal-tab" data-tab="json">JSON</button>
+        </div>
+        <div class="scp-modal-body">
+            <pre id="scp-ctx-formatted" class="scp-ctx-pre"></pre>
+            <pre id="scp-ctx-json" class="scp-ctx-pre" style="display:none"></pre>
+        </div>
+        <div class="scp-modal-footer">
+            <button class="scp-action-btn" id="scp-ctx-copy-btn">${I.copy}<span>Copy</span></button>
+        </div>
+    </div>
+</div>

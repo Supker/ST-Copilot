@@ -1,0 +1,19 @@
+<div id="scp-picker-overlay" class="scp-modal-overlay" style="display:none">
+    <div class="scp-modal scp-picker-box">
+        <div class="scp-modal-header">
+            <span style="display:flex;align-items:center;gap:8px;color:var(--scp-accent)">${I.pick}<span style="color:var(--scp-text);font-size:13px;font-weight:600">Pick Context Messages</span></span>
+            <div style="display:flex;align-items:center;gap:7px">
+                <span class="scp-picker-count" id="scp-picker-count">0 selected</span>
+                <button class="scp-action-btn" id="scp-picker-all">All</button>
+                <button class="scp-action-btn" id="scp-picker-invert">Invert</button>
+                <button class="scp-hbtn scp-hbtn-close" id="scp-picker-close">${I.x}</button>
+            </div>
+        </div>
+        <div class="scp-picker-hint">Click to toggle · Shift+click for range · Selected messages replace the Ctx depth slider</div>
+        <div class="scp-modal-body scp-picker-body" id="scp-picker-body"></div>
+        <div class="scp-modal-footer" style="justify-content:space-between;gap:8px">
+            <button class="scp-action-btn" id="scp-picker-clear">Clear Selection</button>
+            <button class="scp-action-btn scp-picker-apply-btn" id="scp-picker-apply">${I.check} Apply</button>
+        </div>
+    </div>
+</div>

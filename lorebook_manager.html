@@ -1,0 +1,129 @@
+<div id="scp-lb-overlay" class="scp-lb-overlay" style="display:none">
+    <div class="scp-lb-panel">
+        <div class="scp-lb-header">
+            <div class="scp-lb-header-left">
+                <span class="scp-lb-title-icon">${I.book}</span>
+                <span class="scp-lb-title">Lorebook Manager</span>
+            </div>
+            <div class="scp-lb-header-center">
+                <div class="scp-lb-search-wrap">
+                    ${I.search}
+                    <input type="text" id="scp-lb-search" class="scp-lb-search" placeholder="Search entries by name, keys, content…">
+                </div>
+            </div>
+            <div class="scp-lb-header-right">
+                <label class="scp-lb-toggle-wrap" title="Auto-inject entries whose keywords appear in main chat or Copilot">
+                    <span class="scp-lb-toggle-label">Auto-Keywords</span>
+                    <div class="scp-lb-toggle" id="scp-lb-auto-kw-toggle"><div class="scp-lb-toggle-knob"></div></div>
+                </label>
+                <label class="scp-lb-toggle-wrap" title="Allow AI to propose lorebook changes via chat">
+                    <span class="scp-lb-toggle-label">AI Edits</span>
+                    <div class="scp-lb-toggle" id="scp-lb-ai-toggle"><div class="scp-lb-toggle-knob"></div></div>
+                </label>
+                <button class="scp-hbtn scp-hbtn-close" id="scp-lb-close">${I.x}</button>
+            </div>
+        </div>
+
+        <div class="scp-lb-body">
+            <div class="scp-lb-sidebar">
+                <div class="scp-lb-sidebar-header">
+                    <span class="scp-lb-sidebar-title">Lorebooks</span>
+                    <button class="scp-tbtn" id="scp-lb-refresh" title="Refresh list">${I.refresh}</button>
+                </div>
+                <div class="scp-lb-book-list" id="scp-lb-book-list">
+                    <div class="scp-lb-loading">Loading…</div>
+                </div>
+                <div class="scp-lb-sidebar-legend">
+                    <span class="scp-lb-legend-item"><span class="scp-lb-src-badge scp-lb-src-global">G</span> Global</span>
+                    <span class="scp-lb-legend-item"><span class="scp-lb-src-badge scp-lb-src-character">C</span> Char</span>
+                    <span class="scp-lb-legend-item"><span class="scp-lb-src-badge scp-lb-src-chat">Ch</span> Chat</span>
+                </div>
+            </div>
+
+            <div class="scp-lb-main">
+                <div class="scp-lb-main-toolbar">
+                    <span class="scp-lb-entries-label" id="scp-lb-entries-label">Select a lorebook</span>
+                    <div class="scp-lb-main-actions" id="scp-lb-main-actions" style="display:none">
+                        <button class="scp-lb-bulk-btn" id="scp-lb-enable-all">Force All On</button>
+                        <button class="scp-lb-bulk-btn" id="scp-lb-disable-all">Force All Off</button>
+                        <button class="scp-lb-bulk-btn" id="scp-lb-reset-overrides">Reset All</button>
+                        <button class="scp-lb-bulk-btn scp-lb-add-btn" id="scp-lb-add-entry">${I.plus} New Entry</button>
+                    </div>
+                </div>
+                <div class="scp-lb-ctx-legend" id="scp-lb-ctx-legend" style="display:none">
+                    <span class="scp-lb-ctx-legend-item"><span class="scp-lb-ind-demo scp-lb-ind-in-ctx"></span>In context</span>
+                    <span class="scp-lb-ctx-legend-item"><span class="scp-lb-ind-demo forced-on"></span>Force On</span>
+                    <span class="scp-lb-ctx-legend-item"><span class="scp-lb-ind-demo forced-off"></span>Force Off</span>
+                    <span class="scp-lb-ctx-legend-item"><span class="scp-lb-ind-demo scp-lb-ind-demo-disabled"></span>Disabled</span>
+                    <span class="scp-lb-ctx-legend-item"><span class="scp-lb-ind-demo"></span>Default</span>
+                </div>
+                <div class="scp-lb-entries-container">
+                    <div class="scp-lb-entries" id="scp-lb-entries">
+                        <div class="scp-lb-empty-state"><div class="scp-empty-icon">${I.book}</div><div>Select a lorebook to view its entries</div></div>
+                    </div>
+                    <div class="scp-lb-entry-detail" id="scp-lb-entry-detail" style="display:none">
+                        <div class="scp-lb-detail-header">
+                            <button class="scp-lb-back-btn" id="scp-lb-back">← Back</button>
+                            <span class="scp-lb-detail-title" id="scp-lb-detail-title">Entry</span>
+                            <div class="scp-lb-detail-actions">
+                                <button class="scp-lb-detail-btn" id="scp-lb-detail-copy" title="Copy content">${I.copy}</button>
+                                <button class="scp-lb-detail-btn scp-lb-detail-save-btn" id="scp-lb-detail-save" title="Save">${I.check} Save</button>
+                                <button class="scp-lb-detail-btn scp-lb-detail-danger" id="scp-lb-detail-delete" title="Delete entry">${I.trash}</button>
+                            </div>
+                        </div>
+                        <div class="scp-lb-detail-body">
+                            <div class="scp-lb-detail-row">
+                                <label class="scp-lb-detail-label">Name / Comment</label>
+                                <input type="text" class="scp-lb-detail-input" id="scp-lb-detail-name" placeholder="Entry name">
+                            </div>
+                            <div class="scp-lb-detail-row">
+                                <label class="scp-lb-detail-label">Trigger Keys <span class="scp-lb-label-hint">(comma-separated)</span></label>
+                                <input type="text" class="scp-lb-detail-input" id="scp-lb-detail-triggers" placeholder="keyword1, keyword2, /regex/i">
+                            </div>
+                            <div class="scp-lb-detail-row scp-lb-detail-row-grow">
+                                <label class="scp-lb-detail-label">Content</label>
+                                <textarea class="scp-lb-detail-textarea" id="scp-lb-detail-content" placeholder="Entry content…"></textarea>
+                            </div>
+                            <div class="scp-lb-detail-meta-row">
+                                <div class="scp-lb-detail-meta-item">
+                                    <span class="scp-lb-detail-label">Lorebook Status</span>
+                                    <div class="scp-lb-detail-status" id="scp-lb-detail-lb-status" title="Click to toggle in lorebook">Enabled</div>
+                                </div>
+                                <div class="scp-lb-detail-meta-item">
+                                    <span class="scp-lb-detail-label">Copilot Context Injection</span>
+                                    <div style="display:flex;flex-direction:column;gap:4px">
+                                        <div class="scp-lb-detail-injection">
+                                            <button class="scp-lb-inj-btn" data-val="default" id="scp-lb-inj-default">Default</button>
+                                            <button class="scp-lb-inj-btn" data-val="true" id="scp-lb-inj-force-on">Force On</button>
+                                            <button class="scp-lb-inj-btn" data-val="false" id="scp-lb-inj-force-off">Force Off</button>
+                                        </div>
+                                        <span class="scp-lb-inj-hint" id="scp-lb-inj-hint"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="scp-lb-footer">
+            <span class="scp-lb-footer-info" id="scp-lb-footer-info"></span>
+            <span class="scp-lb-footer-ctx" id="scp-lb-footer-ctx"></span>
+        </div>
+    </div>
+</div>
+
+<div id="scp-diff-modal" class="scp-modal-overlay" style="display:none">
+    <div class="scp-modal scp-diff-modal-box">
+        <div class="scp-modal-header">
+            <span class="scp-diff-modal-title">${I.edit} Diff View</span>
+            <button class="scp-hbtn scp-hbtn-close" id="scp-diff-close">${I.x}</button>
+        </div>
+        <div class="scp-modal-tabs">
+            <button class="scp-modal-tab active" data-diff-tab="split">Split</button>
+            <button class="scp-modal-tab" data-diff-tab="unified">Unified</button>
+        </div>
+        <div class="scp-modal-body scp-diff-body" id="scp-diff-body"></div>
+    </div>
+</div>

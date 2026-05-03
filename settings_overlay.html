@@ -1,0 +1,265 @@
+<div id="scp-settings-overlay" class="scp-settings-overlay" style="display:none">
+  <div class="scp-settings-panel">
+
+    <div class="scp-sp-header">
+      <div class="scp-sp-header-left">
+        <span style="color:var(--scp-accent);display:flex">${I.gear}</span>
+        <span class="scp-sp-title">Settings</span>
+      </div>
+      <div class="scp-sp-tabs">
+        <button class="scp-sp-tab active" data-sptab="global">Global</button>
+        <button class="scp-sp-tab" data-sptab="prompts">Quick Prompts</button>
+        <button class="scp-sp-tab" data-sptab="session">
+          Session
+          <span class="scp-sp-override-dot" id="scp-sp-override-dot" style="display:none" title="Session overrides active"></span>
+        </button>
+        <button class="scp-sp-tab" data-sptab="stats">Stats</button>
+      </div>
+      <div class="scp-sp-header-right">
+        <button class="scp-hbtn scp-hbtn-close" id="scp-sp-close">${I.x}</button>
+      </div>
+    </div>
+
+    <div class="scp-sp-body">
+
+      <!-- ══ GLOBAL TAB ══ -->
+      <div class="scp-sp-tab-pane" id="scp-sp-pane-global">
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-sliders"></i> General</div>
+          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-enabled"><span>Enable ST-Copilot</span></label>
+          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-icon-persistent"><span>Always show floating icon</span></label>
+          <div class="scp-sp-row" style="gap:8px;margin-top:6px">
+            <label class="scp-sp-check" style="flex:0 0 auto"><input type="checkbox" id="scp-sp-hotkey-enabled"><span>Shortcut</span></label>
+            <input type="text" class="scp-sp-input" id="scp-sp-hotkey" placeholder="Alt+Shift+C" style="flex:1">
+          </div>
+          <div class="scp-sp-field" style="margin-top:4px">
+            <label class="scp-sp-label">Window Opacity</label>
+            <div class="scp-sp-row">
+              <input type="range" class="scp-slider" id="scp-sp-opacity-slider" min="20" max="100" style="flex:1">
+              <span id="scp-sp-opacity-val" style="min-width:32px;text-align:right;font-size:11px;color:var(--scp-accent)">95%</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-ghost"></i> Ghost Mode</div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-label">Ghost Opacity <span class="scp-sp-hint">(window becomes transparent + click-through)</span></label>
+            <div class="scp-sp-row">
+              <input type="range" class="scp-slider" id="scp-sp-ghost-opacity" min="15" max="50" style="flex:1">
+              <span id="scp-sp-ghost-opacity-val" style="min-width:32px;text-align:right;font-size:11px;color:var(--scp-accent)">15%</span>
+            </div>
+          </div>
+          <div class="scp-sp-row" style="gap:8px;margin-top:4px">
+            <label class="scp-sp-check" style="flex:0 0 auto"><input type="checkbox" id="scp-sp-ghost-hotkey-enabled"><span>Shortcut</span></label>
+            <input type="text" class="scp-sp-input" id="scp-sp-ghost-hotkey" placeholder="Alt+Shift+G" style="flex:1">
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-bookmark"></i> Configuration Profiles</div>
+          <div class="scp-profile-bar">
+            <select id="scp-sp-profile-select"></select>
+            <button class="scp-profile-icon-btn" id="scp-sp-profile-save" title="Save to profile"><i class="fa-solid fa-floppy-disk"></i></button>
+            <button class="scp-profile-icon-btn" id="scp-sp-profile-create" title="New profile"><i class="fa-solid fa-plus"></i></button>
+            <button class="scp-profile-icon-btn" id="scp-sp-profile-rename" title="Rename"><i class="fa-solid fa-pen"></i></button>
+            <button class="scp-profile-icon-btn danger" id="scp-sp-profile-delete" title="Delete"><i class="fa-solid fa-trash"></i></button>
+          </div>
+          <div class="scp-binding-row" id="scp-sp-binding-section" style="display:none">
+            <span class="scp-binding-label">Auto-load for:</span>
+            <button class="scp-bind-btn" id="scp-sp-bind-char"><i class="fa-solid fa-user"></i> Character</button>
+            <button class="scp-bind-btn" id="scp-sp-bind-chat"><i class="fa-solid fa-comments"></i> Chat</button>
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-plug"></i> Connection</div>
+          <select class="scp-sp-select" id="scp-sp-conn-source">
+            <option value="default">Use Current API</option>
+            <option value="profile">Use Specific Profile</option>
+          </select>
+          <div class="scp-sp-field" id="scp-sp-global-profile-group" style="display:none; margin-top:6px">
+            <label class="scp-sp-label">Connection Profile</label>
+            <select class="scp-sp-select" id="scp-sp-conn-profile">
+              <option value="">-- Select Profile --</option>
+            </select>
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-label">Max Response Tokens</label>
+            <input type="number" class="scp-sp-input" id="scp-sp-max-tokens" placeholder="2048" min="64" max="32768">
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-box-archive"></i> Context Payload</div>
+          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-include-sysprompt"><span>Include ST System Prompt</span></label>
+          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-include-anote"><span>Include Author's Note</span></label>
+          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-include-charcard"><span>Include Character Card</span></label>
+          <label class="scp-sp-check"><input type="checkbox" id="scp-sp-include-persona"><span>Include User Persona</span></label>
+          <div class="scp-sp-field" style="margin-top:8px">
+            <label class="scp-sp-label">Main Chat Depth</label>
+            <div class="scp-sp-row">
+              <input type="range" class="scp-slider" id="scp-sp-depth-slider" min="0" max="100" style="flex:1">
+              <span class="scp-depth-val" id="scp-sp-depth-val" style="cursor:default">15</span>
+            </div>
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-label">Session History Limit</label>
+            <input type="number" class="scp-sp-input" id="scp-sp-history-limit" placeholder="50" min="1" max="500">
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-label">Reasoning Trim Strings <span class="scp-sp-hint">(one per line)</span></label>
+            <textarea class="scp-sp-textarea" id="scp-sp-reasoning-trim" rows="2" placeholder="<think></think>"></textarea>
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-message"></i> System Prompt</div>
+          <textarea class="scp-sp-textarea scp-sp-textarea-lg" id="scp-sp-sysprompt" rows="7"></textarea>
+          <button class="scp-action-btn" id="scp-sp-reset-prompt" style="margin-top:6px">${I.refresh}<span>Reset to Default</span></button>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-book"></i> Lorebook AI Edits</div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-label">AI Edit Prompt <span class="scp-sp-hint">macros: {{lorebook_output}}, {{active_lorebooks}}</span></label>
+            <textarea class="scp-sp-textarea" id="scp-sp-lb-manage-prompt" rows="4" style="font-family:monospace;font-size:11px"></textarea>
+            <button class="scp-action-btn" id="scp-sp-reset-lb-prompt" style="margin-top:4px">${I.refresh}<span>Reset</span></button>
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-label">Main chat keytriggers scan depth</label>
+            <input type="number" class="scp-sp-input" id="scp-sp-lb-st-scan-depth" placeholder="5" min="0" max="200">
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-label">Copilot keytriggers scan depth</label>
+            <input type="number" class="scp-sp-input" id="scp-sp-lb-copilot-scan-depth" placeholder="6" min="0" max="200">
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-palette"></i> Interface Theme</div>
+          <div id="scp-sp-theme-section"></div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title" style="color:var(--scp-danger)"><i class="fa-solid fa-triangle-exclamation"></i> Danger Zone</div>
+          <button class="scp-action-btn scp-sp-danger-btn" id="scp-sp-clear-sessions">${I.trash}<span>Clear All Sessions</span></button>
+        </div>
+
+      </div>
+
+      <!-- ══ QUICK PROMPTS TAB ══ -->
+      <div class="scp-sp-tab-pane" id="scp-sp-pane-prompts" style="display:none">
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-bolt"></i> Quick Prompts</div>
+          <p style="font-size:11px;color:var(--scp-text-muted);margin:0 0 8px">Click a button in the toolbar (⚡) to show the bar. Each prompt fills the input box when clicked.</p>
+          <div id="scp-sp-qp-container"></div>
+        </div>
+      </div>
+
+      <!-- ══ SESSION TAB ══ -->
+      <div class="scp-sp-tab-pane" id="scp-sp-pane-session" style="display:none">
+
+        <div class="scp-sp-session-banner">
+          <span>${I.edit}</span>
+          <span>Overrides global settings for the current session only.</span>
+          <button class="scp-sp-reset-all-btn" id="scp-sp-reset-all-overrides">Reset All</button>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-plug"></i> Connection</div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="connectionSource">Connection Source</label>
+            <div class="scp-sp-ov-wrap">
+              <select class="scp-sp-select" id="scp-sp-ov-conn-source">
+                <option value="default">Use Current API</option>
+                <option value="profile">Use Specific Profile</option>
+              </select>
+              <button class="scp-sp-ov-clear" data-ovkey="connectionSource" title="Clear override" disabled>↺</button>
+            </div>
+          </div>
+          <div class="scp-sp-field" id="scp-sp-ov-profile-group" style="display:none">
+            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="connectionProfileId">Profile</label>
+            <div class="scp-sp-ov-wrap">
+              <select class="scp-sp-select" id="scp-sp-ov-conn-profile">
+                <option value="">-- Select Profile --</option>
+              </select>
+              <button class="scp-sp-ov-clear" data-ovkey="connectionProfileId" title="Clear override" disabled>↺</button>
+            </div>
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="maxTokens">Max Tokens</label>
+            <div class="scp-sp-ov-wrap">
+              <input type="number" class="scp-sp-input" id="scp-sp-ov-max-tokens" placeholder="Use global" min="64" max="32768">
+              <button class="scp-sp-ov-clear" data-ovkey="maxTokens" title="Clear override" disabled>↺</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-box-archive"></i> Context Payload</div>
+          <div class="scp-sp-ov-check-row">
+            <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-include-sysprompt"><span>Include ST System Prompt</span></label>
+            <button class="scp-sp-ov-clear" data-ovkey="includeSystemPrompt" title="Clear override" disabled>↺</button>
+          </div>
+          <div class="scp-sp-ov-check-row">
+            <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-include-anote"><span>Include Author's Note</span></label>
+            <button class="scp-sp-ov-clear" data-ovkey="includeAuthorsNote" title="Clear override" disabled>↺</button>
+          </div>
+          <div class="scp-sp-ov-check-row">
+            <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-include-charcard"><span>Include Character Card</span></label>
+            <button class="scp-sp-ov-clear" data-ovkey="includeCharacterCard" title="Clear override" disabled>↺</button>
+          </div>
+          <div class="scp-sp-ov-check-row">
+            <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-include-persona"><span>Include User Persona</span></label>
+            <button class="scp-sp-ov-clear" data-ovkey="includeUserPersonality" title="Clear override" disabled>↺</button>
+          </div>
+          <div class="scp-sp-field" style="margin-top:8px">
+            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="contextDepth">Main Chat Depth</label>
+            <div class="scp-sp-ov-wrap">
+              <input type="range" class="scp-slider" id="scp-sp-ov-depth-slider" min="0" max="100" style="flex:1">
+              <span class="scp-depth-val" id="scp-sp-ov-depth-val" style="cursor:default">15</span>
+              <button class="scp-sp-ov-clear" data-ovkey="contextDepth" title="Clear override" disabled>↺</button>
+            </div>
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="localHistoryLimit">History Limit</label>
+            <div class="scp-sp-ov-wrap">
+              <input type="number" class="scp-sp-input" id="scp-sp-ov-history-limit" placeholder="Use global" min="1" max="500">
+              <button class="scp-sp-ov-clear" data-ovkey="localHistoryLimit" title="Clear override" disabled>↺</button>
+            </div>
+          </div>
+          <div class="scp-sp-field">
+            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="reasoningTrimStrings">Reasoning Trim</label>
+            <div class="scp-sp-ov-wrap scp-sp-ov-wrap-col">
+              <textarea class="scp-sp-textarea" id="scp-sp-ov-reasoning-trim" rows="2" placeholder="Use global"></textarea>
+              <button class="scp-sp-ov-clear" data-ovkey="reasoningTrimStrings" title="Clear override" disabled>↺</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="scp-sp-group">
+          <div class="scp-sp-group-title"><i class="fa-solid fa-message"></i> System Prompt</div>
+          <div class="scp-sp-ov-label-row">
+            <label class="scp-sp-ov-label scp-sp-label" data-ovkey="systemPrompt">Prompt</label>
+            <button class="scp-sp-ov-clear" data-ovkey="systemPrompt" title="Clear override" disabled>↺</button>
+          </div>
+          <textarea class="scp-sp-textarea scp-sp-textarea-lg" id="scp-sp-ov-sysprompt" placeholder="Using global system prompt…"></textarea>
+        </div>
+
+      </div>
+
+      <!-- ══ STATS TAB ══ -->
+      <div class="scp-sp-tab-pane" id="scp-sp-pane-stats" style="display:none">
+        <div id="scp-sp-stats-container"></div>
+      </div>
+
+    </div>
+
+    <div class="scp-sp-footer">
+      <span class="scp-sp-footer-info" id="scp-sp-footer-info"></span>
+    </div>
+
+  </div>
+</div>
