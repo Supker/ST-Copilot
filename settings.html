@@ -2,7 +2,7 @@
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
             <b>ST-Copilot</b>
-            <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content" style="padding-top:10px;">
             <div class="flex-container flexFlowColumn gap-1">
@@ -122,18 +122,27 @@
                 <div class="inline-drawer scp-settings-drawer">
                     <div class="inline-drawer-toggle inline-drawer-header">
                         <b><i class="fa-solid fa-plug" style="margin-right:6px"></i>Connection</b>
-                        <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                     </div>
                     <div class="inline-drawer-content">
                         <select id="scp-conn-source" class="text_pole">
                             <option value="default">Use Currently Selected API</option>
                             <option value="profile">Use Specific Profile</option>
+                            <option value="custom">Custom Endpoint</option>
                         </select>
                         <div id="scp-profile-group" style="display:none; margin-top:8px">
                             <label style="font-size:11px; color:#888; display:block; margin-bottom:4px">Connection Profile</label>
                             <select id="scp-conn-profile" class="text_pole">
                                 <option value="">-- Select Profile --</option>
                             </select>
+                        </div>
+                        <div id="scp-custom-profile-group" style="display:none; margin-top:8px">
+                            <label style="font-size:11px; color:#888; display:block; margin-bottom:4px">Endpoint URL</label>
+                            <input id="scp-custom-url" type="text" class="text_pole" placeholder="http://localhost:5000/v1" />
+                            <label style="font-size:11px; color:#888; display:block; margin-top:6px; margin-bottom:4px">API Key (optional)</label>
+                            <input id="scp-custom-key" type="password" class="text_pole" placeholder="sk-..." />
+                            <label style="font-size:11px; color:#888; display:block; margin-top:6px; margin-bottom:4px">Model Name</label>
+                            <input id="scp-custom-model" type="text" class="text_pole" placeholder="e.g. llama3" />
                         </div>
                         <label style="margin-top:10px; font-size:11px; color:#888; display:block; margin-bottom:4px">Max Response Tokens</label>
                         <input id="scp-max-tokens" type="number" class="text_pole" placeholder="2048" min="64" max="32768" />
@@ -152,13 +161,15 @@
                 <div class="inline-drawer scp-settings-drawer">
                     <div class="inline-drawer-toggle inline-drawer-header">
                         <b><i class="fa-solid fa-box-archive" style="margin-right:6px"></i>Context Payload</b>
-                        <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                     </div>
                     <div class="inline-drawer-content">
                         <div style="display:flex; flex-direction:column; gap:4px">
                             <label class="checkbox_label"><input id="scp-include-sysprompt" type="checkbox" /><span>Include ST System Prompt</span></label>
                             <label class="checkbox_label"><input id="scp-include-persona" type="checkbox" /><span>Include User Persona</span></label>
-                            <label class="checkbox_label"><input id="scp-apply-regex" type="checkbox" /><span>Apply Regex Scripts to context</span></label>
+                            <label class="checkbox_label"><input id="scp-auto-expand-macros" type="checkbox" /><span>Auto-expand macros in user input</span></label>
+                            <label class="checkbox_label"><input id="scp-include-hidden-msgs" type="checkbox" /><span>Include hidden messages in context</span></label>
+                            <label class="checkbox_label"><input id="scp-include-alt-swipes" type="checkbox" /><span>Include alternate swipes of the last message</span></label>
                         </div>
                         <div style="margin-top:14px; border-top:1px solid rgba(255,255,255,.06); padding-top:12px; display:flex; flex-direction:column; gap:4px">
                             <b style="font-size:12px; margin-bottom:2px">Character fields sent to AI context:</b>
@@ -182,6 +193,21 @@
                             </label>
                             <textarea id="scp-reasoning-trim" class="text_pole" rows="3" style="font-size:12px;font-family:monospace" placeholder="&lt;think&gt;&lt;/think&gt;&#10;&lt;thinking&gt;&lt;/thinking&gt;"></textarea>
                         </div>
+                        <div style="margin-top:14px; border-top:1px solid rgba(255,255,255,.06); padding-top:12px; display:flex; flex-direction:column; gap:4px">
+                            <b style="font-size:12px; margin-bottom:2px">Third-party Extension Support</b>
+                            <label class="checkbox_label" title="Use ST-Regex Extension to apply regex scripts to context"></label>
+                                <input id="scp-apply-regex" type="checkbox" />
+                                <span>Apply Regex Scripts to context</span>
+                            </label>
+                            <label class="checkbox_label" title="Inject the active Summaryception summary into Copilot context and exclude ghosted (summarized) messages">
+                                <input id="scp-include-summaryception" type="checkbox" />
+                                <span>Summaryception integration</span>
+                            </label>
+                            <label class="checkbox_label" title="Use active Aspect: Evolutia alter ego for character description and user persona">
+                                <input id="scp-use-aspect-evolutia" type="checkbox" />
+                                <span>Aspect: Evolutia integration</span>
+                            </label>
+                        </div>
                     </div>
                 </div>
 
@@ -189,7 +215,7 @@
                 <div class="inline-drawer scp-settings-drawer">
                     <div class="inline-drawer-toggle inline-drawer-header">
                         <b><i class="fa-solid fa-message" style="margin-right:6px"></i>System Prompt</b>
-                        <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                     </div>
                     <div class="inline-drawer-content">
                         <textarea id="scp-sysprompt" class="text_pole autoSetHeight" rows="6" style="font-size:12px; margin-top:4px"></textarea>
@@ -203,7 +229,7 @@
                 <div class="inline-drawer scp-settings-drawer">
                     <div class="inline-drawer-toggle inline-drawer-header">
                         <b><i class="fa-solid fa-user-pen" style="margin-right:6px"></i>Character Card AI Edits</b>
-                        <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                     </div>
                     <div class="inline-drawer-content">
                         <label class="checkbox_label">
@@ -227,7 +253,7 @@
                 <div class="inline-drawer scp-settings-drawer">
                     <div class="inline-drawer-toggle inline-drawer-header">
                         <b><i class="fa-solid fa-book" style="margin-right:6px"></i>Lorebook AI Edits</b>
-                        <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                     </div>
                     <div class="inline-drawer-content">
                         <div style="display:flex;gap:16px;margin-bottom:10px;flex-wrap:wrap">
@@ -262,7 +288,7 @@
                 <div class="inline-drawer scp-settings-drawer">
                     <div class="inline-drawer-toggle inline-drawer-header">
                         <b><i class="fa-solid fa-comments" style="margin-right:6px"></i>Chat Message AI Edits</b>
-                        <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                     </div>
                     <div class="inline-drawer-content">
                         <label class="checkbox_label">
@@ -284,14 +310,14 @@
                 <div class="inline-drawer scp-settings-drawer">
                     <div class="inline-drawer-toggle inline-drawer-header">
                         <b><i class="fa-solid fa-ellipsis" style="margin-right:6px"></i>Other</b>
-                        <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                     </div>
                     <div class="inline-drawer-content">
                         <!-- Window Background -->
                         <div class="inline-drawer scp-settings-drawer">
                             <div class="inline-drawer-toggle inline-drawer-header">
                                 <b><i class="fa-solid fa-image" style="margin-right:6px"></i>Window Background</b>
-                                <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+                                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                             </div>
                             <div class="inline-drawer-content" id="scp-bg-settings">
                                 <!-- js injects here -->
@@ -321,9 +347,41 @@
                 <div class="inline-drawer scp-settings-drawer">
                     <div class="inline-drawer-toggle inline-drawer-header">
                         <b><i class="fa-solid fa-palette" style="margin-right:6px"></i>Interface Theme</b>
-                        <div class="inline-drawer-icon fa-solid fa-circle-down down"></div>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                     </div>
                     <div class="inline-drawer-content" id="scp-theme-section"></div>
+                </div>
+
+                <!-- ── Memory ─────────────────────────────────── -->
+                <div class="scp-settings-flat-section">
+                    <div class="scp-settings-flat-title"><i class="fa-solid fa-brain"></i> Persistent Memory</div>
+                    <label class="checkbox_label">
+                        <input id="scp-memory-enabled" type="checkbox" />
+                        <span>Enable persistent memory</span>
+                    </label>
+                    <label class="checkbox_label" style="margin-top:6px">
+                        <input id="scp-memory-inject" type="checkbox" />
+                        <span>Inject memory into AI context</span>
+                    </label>
+                    <div style="margin-top:12px; border-top:1px solid rgba(255,255,255,.06); padding-top:10px">
+                        <button id="scp-open-memory-settings" class="menu_button interactable" style="width:100%">
+                            <i class="fa-solid fa-brain"></i> Manage Memory
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ── Tool Calls ──────────────────────────────── -->
+                <div class="scp-settings-flat-section">
+                    <div class="scp-settings-flat-title"><i class="fa-solid fa-screwdriver-wrench"></i> Tool Calls</div>
+                    <label class="checkbox_label">
+                        <input id="scp-tools-enabled" type="checkbox" />
+                        <span>Enable tool calls for Copilot</span>
+                    </label>
+                    <div style="margin-top:8px">
+                        <button id="scp-open-tools-settings" class="menu_button interactable" style="width:100%">
+                            <i class="fa-solid fa-toolbox"></i> Configure Tools
+                        </button>
+                    </div>
                 </div>
 
             </div>

@@ -17,6 +17,7 @@ Enter **ST-Copilot** — an advanced Out-Of-Character (OOC) meta-assistant, crea
 | **🧠 Smart Brainstorming** | Ask for plot twists, scene analysis, or character psychological breakdowns without breaking your RP flow. |
 | **🎭 Character Editor** | Create characters from scratch or edit existing cards (description, personality, first messages, etc.) directly in the UI. |
 | **📚 AI Lorebook Manager** | Command the AI to draft, edit, or delete Lorebook entries based on the chat. Review changes via a Diff-viewer before applying. |
+| **💭 Chat Manager** | Treat your message history like google docs. Ask copilot to edit/hide/add the message. |
 | **🎯 Surgical Context** | Hand-pick specific messages from your chat history to feed into the Copilot's context payload. |
 | **👻 Ghost Mode** | Make the Copilot window semi-transparent and completely click-through so it never gets in your way. |
 | **🎨 Deep Customization** | Built-in theme engine with color pickers, blur effects, and import/export capabilities. |
@@ -124,6 +125,25 @@ A fully integrated, highly detailed theme editor.
 
 ## 📜 Changelog History
 
+### V2.8.0
+*   **Tools & Agency:** Copilot is now agentic! It can independently gather and process information to provide more accurate and context-aware responses.
+*   **Persistent Memory:** Introduced long-term memory that persists across sessions. You can scope memory to **Global**, **Character-specific**, **Chat-specific**, or **Session-only**.
+*   **Smart Anchor Detection:** Implemented a new *Tokenized Sliding Window Levenshtein* algorithm. This ensures "Proposed Changes" are applied accurately even if the LLM makes minor formatting errors.
+*   **UI/UX Overhaul:** 
+    *   Redesigned **Stats Window** with smoother animations and better optimization.
+    *   Refreshed the **Settings UI** within SillyTavern.
+    *   Added **Font Size** adjustment and a toggle for **Hidden Messages**.
+*   **Context Enhancements:** Added support for including all swipes of the last message in the context.
+*   **Extension Support:** Full compatibility for `summaryception` and `aspect:evolutia`.
+*   **Optimization & Fixes:** 
+    *   Refined all internal prompts to be more token-efficient.
+    *   Added **Custom Endpoint** support in connection profiles.
+    *   Fixed UI displacement when opening DevTools.
+    *   Resolved the bug where system messages disappeared after applying proposed changes.
+
+<details>
+<summary><b>Previous Updates (v1.7.0 - v2.7.2)</b></summary>
+
 ### V2.7.2
 *   **Shortcuts Overlay:** Added a dedicated "Shortcuts" configuration window in the settings panel for better accessibility.
 *   **Context-Aware Search:** Improved the search shortcut logic; it now triggers exclusively when the Copilot window is focused to prevent global key conflicts.
@@ -145,9 +165,6 @@ A fully integrated, highly detailed theme editor.
 *   **Advanced Overrides & Sync:** Lorebook, Character, and Chat AI settings are now fully synced with Configuration Profiles and accessible via Session Overrides.
 *   **UX Improvements:** Added an "Always Off" state for Lorebooks, sender-based group selection in the Context Picker, and focus-aware completion sounds.
 *   **Refinements:** Optimized connection profile switching and fixed theme compatibility for list markers and hidden messages.
-
-<details>
-<summary><b>Previous Updates (v1.7.0 - v2.5.1)</b></summary>
 
 ### V2.5.1
 *   **Continue Button:** Added a dedicated button to continue the last Copilot message.

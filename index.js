@@ -10,7 +10,7 @@
     
     // ─── Debug Logger ────────────────────────────────────────────────────────────
     const _DBG = { log: [], MAX: 3000, sessionStart: new Date().toISOString(), _snapshot: null, _diffTid: null };
-    const _DBG_SKIP = new Set(['customTheme','savedThemes','sessions','starredMessages','stats','quickPromptSets','customSounds','completionSoundData','quickPrompts','profiles','promptPresets','altGreetingIndices','windowBgUrl','customBackgrounds']);
+    const _DBG_SKIP = new Set(['customTheme','savedThemes','sessions','starredMessages','stats','quickPromptSets','customSounds','completionSoundData','quickPrompts','profiles','promptPresets','altGreetingIndices','windowBgUrl','customBackgrounds','memories']);
 
     function _dbgStrip(s) {
         const r = {};
@@ -103,16 +103,33 @@
         }
 
         let activeProfileName = 'default';
+        let activeProfileData = null;
         if (activeId && activeId !== 'default' && activeId !== 'gui') {
             const found = profiles.find(p => p.id === activeId);
             activeProfileName = found ? found.name : activeId;
+            if (found) {
+                activeProfileData = JSON.parse(JSON.stringify(found));
+                if (activeProfileData['secret-id']) activeProfileData['secret-id'] = '***REDACTED***';
+            }
         }
 
+        let sessionMsgs = 0;
+        try { sessionMsgs = getCurrentSession()?.messages?.length || 0; } catch(_) {}
+
         const stEnv = {
+            stVersion: document.getElementById('st_version')?.textContent?.trim() || document.querySelector('.drawer-version')?.textContent?.trim() || window.system_version || 'unknown',
+            userAgent: navigator.userAgent,
             mainApi: ctx.api_server || document.getElementById('main_api')?.value || 'unknown',
+            stMaxContext: ctx.chatCompletionSettings?.openai_max_context || ctx.textCompletionSettings?.max_context || window.token_max || 'unknown',
+            stStreamingEnabled: ctx.textCompletionSettings?.streaming || ctx.chatCompletionSettings?.stream_openai || false,
+            disabledExtensions: ctx.extensionSettings?.disabledExtensions || [],
             characterId: ctx.characterId,
             chatId: ctx.chatId,
+            stChatLength: ctx.chat?.length || 0,
+            copilotSessionMsgs: sessionMsgs,
+            hasActiveSessionOverrides: hasSessionOverrides(),
             activeConnectionProfile: activeProfileName,
+            activeConnectionProfileData: activeProfileData,
             connectionProfiles: profiles.map(p => ({
                 id: p.id,
                 name: p.name,
@@ -165,16 +182,13 @@
 
     const DEFAULT_SYSTEM_PROMPT = `<system_prompt>
 <system_role>
-You are "ST-Copilot", an advanced meta-assistant and creative co-writer integrated directly into the SillyTavern frontend. Your purpose is to assist the human user in managing, analyzing, and expanding their current roleplay session. 
+Identify as "ST-Copilot", a meta-analytical engine and creative strategist for SillyTavern.
+- Human: The person operating the interface. Direct your OOC insights to them.
+- {{user}}: The in-universe player avatar.
+- {{char}}: The AI persona/setting.
+- ST-Copilot: You. An OOC observer. 
+MANDATORY: You are NOT {{char}}. Never generate narrative dialogue or actions for {{char}} or {{user}}.
 </system_role>
-
-<entity_definitions>
-To perform your duties perfectly, you must understand the entities involved in this session:
-- {{user}}: The character/avatar actively controlled by the human user in the roleplay.
-- {{char}}: The primary AI character, persona, or setting of the current roleplay.
-- ST-Copilot (You): The Out-Of-Character (OOC) analytical engine and brainstormer. 
-CRITICAL DIRECTIVE: You are ST-Copilot. You are STRICTLY NOT {{char}}. You must never generate roleplay responses, dialogue, or actions on behalf of {{char}} or {{user}}. You exist outside the narrative.
-</entity_definitions>
 
 <persona_configuration>
 You are a professional, friendly, and highly capable creative co-writer.
@@ -198,49 +212,42 @@ A Lorebook (or World Info) is a dynamic memory system used in roleplay to store 
 </context>
 
 <system_mechanics>
-After you generate a proposal, a background script extracts your \`lorebook-changes\` block for the user's UI. Once the user makes a decision, the system AUTOMATICALLY DELETES the code block from your message history to save context tokens. 
-If you look at the chat history and notice your previous \`lorebook-changes\` blocks are missing, understand that this is intentional system behavior. You successfully delivered them. Do NOT re-generate, repeat, or fix missing blocks from past messages.
+After you generate a proposal, a background script extracts your \`lorebook-changes\` block for the user's UI. Once the user makes a decision, the system AUTOMATICALLY DELETES the code block from your message history to save context tokens.
 </system_mechanics>
 
-<guidelines>
-1. Interaction Protocol: Propose updates ONLY upon explicit user command. Use suggestive language ("I propose...", NEVER "Saved/Applied"). Explain your reasoning (what/why) within your conversational response. Treat the code block as a detached appendix—NEVER narratively introduce it (e.g., omit "Here is the code block").
-2. Content Architecture (CRITICAL): Write consice, token-dense, objective, encyclopedic entries. 
-   - ANCHOR RULE: Every \`content\` string MUST start with the [Subject's Proper Name] followed by "is/was". 
-   - PROHIBITION: NEVER start with pronouns (He/She/It), articles (The/A), or introductory fluff.
-   - CHARACTER SPECS: Define height, build/morphology, facial features, hair/eyes, marks/scars, and typical attire.
-3. Anti-Cliché Nomenclature: Actively reject statistically overused LLM names (e.g., Elara, Kael, Lyra). Invent highly original, phonetically distinct names strictly grounded in the specific setting's culture.
-4. Triggers & Routing (CRITICAL): Optimize \`triggers\` using specific, unique nouns (no generic words). Route to active lorebooks (\`{{active_lorebooks}}\`) using absolute strict-string matching. If a required category is missing, generate a logically named NEW lorebook.
-5. MODIFICATION PROTOCOL (Patch vs. Edit):
-   - \`edit\`: Complete field overwrite. STRICTLY RESTRICTED to extremely short entries or 100% total rewrites. NEVER use \`edit\` for minor tweaks in a large block.
-   - \`patch\`: Your DEFAULT operation for modifying existing entries. 
-     * BOUNDARY ANCHOR SYNTAX (CRITICAL): You are STRICTLY FORBIDDEN from writing the full text in the \`anchor\` key. You MUST extract exactly 3-4 words from the START of the target text, add " || ", then 3-4 words from the END.
+<content_standards>
+- Style: Token-dense, encyclopedic, objective.
+- Anchor Rule: Content MUST start with "[Subject Name] is/was". No pronouns/articles at the start.
+- Anti-Cliché: R Actively reject statistically overused LLM names (e.g., Elara, Kael, Lyra). Invent highly original, phonetically distinct names strictly grounded in the specific setting's culture.
+</content_standards>
+
+<modification_protocol>
+- \`add\` / \`delete\`: entry from lorebook.
+- \`prepend\` / \`append\`: Insert text EXACTLY BEFORE or AFTER existing entry content.
+- \`edit\`: Total rewrite (<300 words entries only).
+- \`patch\`: Default for entries. 
+   - Triggers: Use specific nouns.
+   - Boundary Syntax: "First 3 words || Last 3 words" (string-string match). 
      * BAD: "The ancient castle was built in 1240 by a grumpy dwarf."
      * GOOD: "The ancient castle || grumpy dwarf."
-</guidelines>
+</modification_protocol>
 
-<output_formatting>
-When proposing changes, generate a markdown code block tagged exactly as \`lorebook-changes\`.
-This block MUST be placed at the very end of your message, after all conversational text.
+<output_requirement>
+MANDATORY: Proposals MUST be contained in a \`lorebook-changes\` block at the absolute end.
+Active lorebooks (use sctrict-strict match): {{active_lorebooks}}
 
-Format requirement (Strictly adhere to this JSON structure):
+Explain reasoning to the Human briefly, then provide the block: 
 {{lorebook_output}}
-</output_formatting>`;
+</output_requirement>`;
 
     const DEFAULT_CHAR_EDIT_DIRECTIVE = `<context>
-SillyTavern utilizes V2/V3 Character Cards—complex JSON structures that define an entity's cognitive profile, physical attributes, and behavioral heuristics. These cards use specific fields (\`description\`, \`personality\`, \`scenario\`, \`first_mes\`, \`mes_example\`) and dynamic macros (\`{{char}}\`, \`{{user}}\`) to ensure seamless persona-to-user interaction and cross-model portability. You are proposed to manipulate these data structures with surgical precision.
+SillyTavern utilizes Character Cards—complex JSON structures that define {{char}} cognitive profile, physical attributes, and behavioral heuristics. In this module you can also edit \`user_persona\` (if you have access)
 </context>
 
-<system_mechanics>
-You function as a dynamic editor for character and persona JSON blocks. Note: All generated \`character-edits\` or \`character-creation\` blocks are transient; they are removed from the active context window once the user saves the changes to prevent token overflow. The absence of previous blocks is intentional and expected. Never attempt to re-generate, reference, or rectify past blocks unless a direct instruction for a new modification is issued.
-</system_mechanics>
-
-<guidelines>
-1. Interaction: Execute ONLY via explicit command. Explain reasoning naturally. NEVER narratively introduce the code block.
-2. TARGET SCOPES:
-   - Card Edits (\`description\`, \`personality\`, \`first_mes\`, etc.): Modify static AI config.
-   - \`user_persona\` Edits: Modify the player's profile, strictly separate from the AI card.
-3. MACRO RULE PRE-CHECK: You are forbidden from using raw names. Always use \`{{char}}\` and \`{{user}}\`.
-</guidelines>
+<logic_constraints>
+- Transient Memory: Previous \`character-edits\` blocks are purged post-execution. Do not reference them.
+- Macro Imperative: ABSOLUTELY PROHIBITED from using raw names. Use \`{{char}}\` and \`{{user}}\` exclusively in JSON.
+</logic_constraints>
 
 <character_architecture>
 To maximize semantic density and prevent AI hallucinations, you MUST adhere to this framework:
@@ -278,15 +285,14 @@ To maximize semantic density and prevent AI hallucinations, you MUST adhere to t
 
 </character_architecture>
 
-<edit_operations>
-- \`overwrite\`: Complete field rewrite. Use for short fields.
-- \`prepend\` / \`append_text\`: Insert text exactly BEFORE or AFTER existing field data.
-- \`append\`: (Exclusive to \`alternate_greetings\`) Adds a new discrete greeting.
-- \`replace\`: Surgical inline patching. 
-  * BOUNDARY ANCHOR SYNTAX (CRITICAL): You are STRICTLY FORBIDDEN from writing the full text in the search string. Extract exactly 3-4 words from the START, add " || ", then 3-4 words from the END.
+
+<edit_syntax>
+- \`overwrite\`: Full rewrite.
+- \`prepend\` / \`append\`: Edge insertion.
+- \`replace\`: Surgical patch. Use Boundary Anchor: "3-4 Start Words || 3-4 End Words". 
   * BAD: "The quick brown fox jumps over the lazy dog."
   * GOOD: "The quick brown || lazy dog."
-</edit_operations>
+</edit_syntax>
 
 <the_macro_imperative>
 CRITICAL FATAL ERROR PREVENTION: Hardcoding names destroys card portability. 
@@ -297,43 +303,39 @@ You are strictly forbidden from writing the raw name of the character or the use
 This rule overrides everything else. Apply it to EVERY field, EVERY JSON value, EVERY time.
 </the_macro_imperative>
 
-<output_formatting>
-Append ONE markdown block at the absolute end. Maintain strict JSON. Valid fields: {{char_edit_fields}}.
+<output_requirement>
+MANDATORY: Append \`character-edits\` or \`character-creation\` block at the absolute end. 
+Fields: {{char_edit_fields}}.
 
-[IF EDITING EXISTING CARD OR USER PERSONA]
-Tag as \`character-edits\`. Structure:
+Character Edit Format: 
 {{char_edit_format}}
 
-[IF CREATING NEW CARD]
-Tag as \`character-creation\`. Structure:
-{{char_create_format}}
-</output_formatting>`;
+Character creation Format:
+{{char_create_format}}.
+</output_requirement>`;
 
 const DEFAULT_CHAT_EDIT_DIRECTIVE = `<context>
-This module grants read/write access to SillyTavern Chat Messages. You can edit, replace, restructure, hide, or create messages. Contextual roleplay messages are explicitly tagged with a numerical \`index\` (e.g., \`<msg index="5" role="assistant">\`) for precise targeting.
+Read/Write access to chat indices (\`<msg index="N">\`).
 </context>
 
 <system_mechanics>
-Generated \`chat-changes\` blocks are automatically executed and purged from the visible chat history when user makes decision. Missing past blocks are intentional. NEVER hallucinate or re-generate previous blocks. The code block MUST be placed at the ABSOLUTE END of your response.
+Generated \`chat-changes\` blocks are automatically executed and purged from the visible chat history when user makes decision. Missing past blocks are intentional. NEVER hallucinate or re-generate previous blocks.
 </system_mechanics>
 
-<guidelines>
-1. Interaction Protocol: Execute operations ONLY when explicitly requested by the user. Explain your reasoning conversationally. NEVER narratively introduce or narrate the code block itself.
-2. Targeting: Extract the exact \`index\` integer from the \`<msg...>\` tags found in the \`<roleplay_context>\`.
-3. Operation Modalities:
-   - \`add\`: Create a NEW message. MUST declare \`role\` ("user", "assistant", or "system") and \`msg_index\` (insertion position). The \`content\` MUST contain only the message body; DO NOT include speaker prefixes or character names (e.g., "[Name]:").
-   - \`delete\`: Permanently remove a message entirely.
-   - \`hide\` / \`unhide\`: Exclude/include messages from the AI's context window. Target via \`msg_range\`: [start, end] OR \`msg_index\`.
-   - \`overwrite\` (RESTRICTED): Use ONLY when a complete semantic rewrite or absolute replacement of the entire existing message is explicitly required. 
-   - \`prepend\` / \`append\`: Insert text EXACTLY at the extreme start (\`prepend\`) or extreme end (\`append\`) of an existing message.
-   - \`replace\` (DEFAULT EDIT COMMAND): Use for all standard edits and surgical text patches. BOUNDARY ANCHOR FORMAT: Extract exactly 3-4 words from the START + " || " + 3-4 words from the END of the target segment. NEVER write the full text in the anchor.
-    * BAD: "The character looked at the horizon with a sense of deep longing and wondered if they would ever return home." (DO NOT include the full text; this wastes tokens and causes matching errors).
-    * GOOD: "The character looked at || ever return home." 
-   - \`bulk_replace\` / \`regex\`: Target via \`msg_range\`: [start, end] or \`msg_index\`.
-4. Stylistic & Linguistic Coherence (CRITICAL):
-   - Language Mirroring: All edits, overwrites, and newly added messages MUST strictly match the language used in the target message and surrounding chat context.
-   - Voice Preservation: You must seamlessly adapt to the established prose style, formatting, tone, and character voice. Never break linguistic immersion.
-</guidelines>
+<operational_rules>
+1. Target: Use \`msg_index\`, \`msg_range\`, or \`msg_indices\` from \`<roleplay_context>\`.
+2. Operations:
+   - \`add\` / \`delete\`: Insert at \`msg_index\`.
+   - \`prepend\` / \`append\`: Insert exactly at the extreme start/end of a message.
+   - \`hide\` / \`unhide\`: Toggle message visibility for AI.
+   - \`overwrite\`: 100% message replacement.
+   - \`regex\`: Execute pattern-based modification using standard regex syntax.
+   - \`replace\`: Surgical patch (Anchor: "3-4 Start || 3-4 End").
+     * GOOD: "The character looked || ever return home."
+     * BAD: (Writing the entire sentence wastes tokens and breaks matching).
+   - \`bulk_replace\`: Mass search-and-replace across a \`msg_range\`.
+3. Guidelines: No narrative introduction of code.
+</operational_rules>
 
 <output_formatting>
 {{chat_edit_format}}
@@ -345,14 +347,16 @@ Currently visible messages: {{active_chat_ids}}
     const LB_FORMAT_BLOCK = `\`\`\`lorebook-changes
 {"changes":[
   {"action":"add","worldName":"BookName","name":"EntryName","triggers":["keyword"],"content":"Entry content","constant":false},
-  {"action":"edit","worldName":"BookName","uid":123,"name":"NewName","triggers":null (for original keywords) | ["newKw"],"content":"New content","constant":false},
-  {"action":"patch","worldName":"BookName","uid":123,"triggers":null (for original keywords) | ["newKw"],"patches":[{"anchor":"first || last","replace":"replacement"}]},
   {"action":"delete","worldName":"BookName","uid":123,"name":"EntryName"}
+  {"action":"prepend","worldName":"BookName","uid":123,"content":"Text to add at the start"},
+  {"action":"append","worldName":"BookName","uid":123,"content":"Text to add at the end"},
+  {"action":"edit","worldName":"BookName","uid":123,"name":"NewName","triggers":null | ["newKw"],"content":"New content","constant":false},
+  {"action":"patch","worldName":"BookName","uid":123,"triggers":null | ["newKw"],"patches":[{"anchor":"first || last","replace":"replacement"}]},
 ]}
 \`\`\`
 
 Triggers field rules:
-- Omit or set \`null\` to keep the original triggers unchanged (preferred for patches and partial edits)
+- Omit or set \`null\` to keep the original triggers unchanged (preferred for patches, appends and partial edits)
 - Provide an array to set new triggers`;
 
     const CHAR_EDIT_FORMAT_BLOCK = `\`\`\`character-changes
@@ -406,8 +410,67 @@ replacement text
 ]}
 \`\`\``;
 
+    const DEFAULT_MEMORY_PROMPT = `<memory_system>
+<memory_logic>
+Purpose: ADMINISTRATIVE META-MEMORY. This is a non-diegetic (OOC) database for ST-Copilot to track the Human operator's technical requirements, cognitive patterns, and workflow constraints. 
+
+CRITICAL ARCHITECTURAL BOUNDARY: 
+- DISCARD all diegetic narrative data (plot, lore, world-building, character actions).
+- EXCLUDE "What" is happening in the story.
+- CAPTURE "How" the Human wants your answers to be processed, formatted, or steered.
+
+Actions: \`add\`, \`update\`, \`delete\`.
+Routing Scopes (Choose based on instruction longevity/reach):
+- \`global\`: Persists EVERYWHERE. Use for core, permanent Human traits (e.g., IRL profession, absolute formatting rules, universal hard limits).
+- \`character\`: Persists ONLY for current {{char}}. Use for technical OOC instructions tailored to this specific bot (e.g., "Human requires verbose prose for this bot", "Human wants to avoid romance with this bot").
+- \`chat\`: Persists ONLY in this specific roleplay thread. Use for current storyline structural goals (e.g., "Human wants to shift genre to horror here", "Focus on pacing in this scene").
+- \`session\`: Persists ONLY in this current Copilot brainstorm. Use for immediate, temporary directives (e.g., "Human is testing a prompt", "Keep next answers very short").
+</memory_logic>
+
+<output_requirement>
+MANDATORY: Append a \`memory-update\` block at the absolute end IF AND ONLY IF new administrative/OOC metadata about the Human is detected. Do NOT comment on this process.
+
+Every entry MUST start with the exact word "Human".
+
+# Active memories:
+{{current_memories}}
+
+# Format: 
+{{memory_format}}
+</output_requirement>
+</memory_system>`;
+    const MEMORY_FORMAT_BLOCK = `\`\`\`memory-update\n[\n  {"action":"add","scope":"global|character|chat|session","key":"CategoryName","value":"Fact to remember"},\n  {"action":"edit","scope":"exact_existing_scope","key":"exact_existing_key","value":"Updated fact"},\n  {"action":"delete","scope":"exact_existing_scope","key":"exact_existing_key"}\n]\n\`\`\``;
+
+    const DEFAULT_TOOLS_PROMPT = `<tool_calls_system>
+Imperative: NEVER hallucinate missing context. If chat history, specific lore, or data appears absent, DO NOT assume the chat hasn't started or the data doesn't exist. You MUST proactively use your tools to fetch, verify, and retrieve the actual state before answering.
+
+Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response to the Human. You may chain tools sequentially.
+
+<available_tools>
+{{tools_list}}
+</available_tools>
+
+<output_format>
+{{tool_call_format}}.
+</output_format>
+</tool_calls_system>`;
+    const TOOL_CALL_FORMAT_BLOCK = `\`\`\`tool_call\n{"name": "tool_name","input": {"parameter_name": "value"}}\n\`\`\``;
+
     // ─── Changelog Data ──────────────────────────────────────────────────────────
     const CHANGELOG = [
+    {
+        version: '2.8.0',
+        date: '6/11/2026',
+        announce: true,
+        notes: [
+            '<strong>Tools & Agency</strong> — Copilot can now independently gather information using the new Tools system.',
+            '<strong>Persistent Memory</strong> — Introduced cross-session memory with Global, Character, Chat, and Session scoping.',
+            '<strong>Smart Anchor Detection</strong> — New Tokenized Sliding Window Levenshtein algorithm for flawless "Proposed Changes" application.',
+            '<strong>UI & Customization</strong> — Redesigned Stats window, refreshed Settings interface, and added font size controls.',
+            '<strong>Extensions & Context</strong> — Added support for all swipes in context. Also for Summaryception, and Aspect:Evolutia extensions.',
+            '<strong>Optimization</strong> — All internal prompts are now more token-efficient; fixed DevTools UI bugs and connection profile issues.'
+        ],
+    },
     {
         version: '2.7.2',
         date: '5/29/2026',
@@ -728,6 +791,7 @@ replacement text
         { key: 'radius',     label: 'Corner Radius', hint: '10px' },
         { key: 'shadow',     label: 'Shadow',        hint: 'CSS box-shadow' },
         { key: 'font',       label: 'Font Family',   hint: "system-ui, sans-serif" },
+        { key: 'fontSize',   label: 'Font Size',     hint: '13px' },
     ];
 
     const THEME_CSS_MAP = {
@@ -739,6 +803,7 @@ replacement text
         inputBg: '--scp-input-bg', codeBg: '--scp-code-bg',
         radius: '--scp-radius', shadow: '--scp-shadow',
         danger: '--scp-danger', success: '--scp-success', font: '--scp-font',
+        fontSize: '--scp-font-size',
     };
 
     // ─── Lorebook (World Info) Module ─────────────────────────────────────────────
@@ -805,6 +870,7 @@ replacement text
                 _wiCache[name] = data;
                 return data;
             } catch (e) {
+                _dbgAdd('LB_LOAD_FILE_FAILED', { bookName: name, error: e.message });
                 console.error(`[${EXT_DISPLAY}] WI load failed for "${name}":`, e);
                 return null;
             } finally {
@@ -859,6 +925,7 @@ replacement text
                 }
             }
         } catch (e) {
+            _dbgAdd('LB_SAVE_FILE_FAILED', { bookName: name, error: e.message });
             console.error(`[${EXT_DISPLAY}] saveWorldInfoBook failed for "${name}":`, e);
             throw e;
         }
@@ -1150,7 +1217,7 @@ replacement text
             .replace('{{active_lorebooks}}', activeBooksStr)
             .replace('{{lorebook_output}}', LB_FORMAT_BLOCK);
             
-        return `<lorebook_management: module>\n${prompt}\n</lorebook_management: module>`;
+        return `<lorebook_management>\n${prompt}\n</lorebook_management>`;
     }
 
     // ─── Character Card Editing Engine ───────────────────────────────────────────
@@ -1300,6 +1367,13 @@ replacement text
             first_mes: d.first_mes || char.first_mes,
             mes_example: d.mes_example || char.mes_example,
         };
+
+        // Aspect: Evolutia
+        if (getSettings().useAspectEvolutia) {
+            const aeDesc = _getAspectEvolutiaCharDescription();
+            if (aeDesc) simple.description = aeDesc;
+        }
+
         for (const [key, val] of Object.entries(simple)) {
             if (getEffectiveCharField(settings, key) && val) parts.push(`<${key}>\n${val}\n</${key}>`);
         }
@@ -1333,7 +1407,7 @@ replacement text
             .replace('{{char_edit_fields}}', enabledFields)
             .replace('{{char_edit_format}}', CHAR_EDIT_FORMAT_BLOCK)
             .replace('{{char_create_format}}', CHAR_CREATE_FORMAT_BLOCK);
-        return `<character_management: module>\n${base}\n</character_management: module>`;
+        return `<character_management>\n${base}\n</character_management>`;
     }
 
     function buildChatEditAIInstructions(settings) {
@@ -1357,7 +1431,7 @@ replacement text
         const base = (settings.chatEditPrompt || DEFAULT_CHAT_EDIT_DIRECTIVE.trim())
             .replace('{{chat_edit_format}}', CHAT_EDIT_FORMAT_BLOCK)
             .replace('{{active_chat_ids}}', activeChatIds);
-        return `<chat_messages_editing: module>\n${base}\n</chat_message_editing: module>`;
+        return `<chat_messages_editing>\n${base}\n</chat_messages_editing>`;
     }
 
     function _sanitizeProposedTags(value) {
@@ -1429,7 +1503,16 @@ replacement text
                     patches.push({ search: searchVal, replace: '' });
                 }
             }
-            if (!patches.length) continue;
+            
+            if (!patches.length) {
+                let val = content.trim();
+                if (field === 'tags') val = _sanitizeProposedTags(val);
+                const item = { field, action: 'overwrite', value: val };
+                if (index !== undefined) item.index = index;
+                changes.push(item);
+                continue;
+            }
+            
             if (!replaceByField[key]) {
                 const item = { field, action: 'replace', patches };
                 if (index !== undefined) item.index = index;
@@ -1592,17 +1675,81 @@ replacement text
         const srch = searchText || '';
         const repl = replaceText || '';
 
-        const createFuzzyRegex = (str) => {
-            const tokens = str.trim().split(/[\s\-—_~*]+/);
-            const regexParts = tokens.map(token => {
-                if (!token) return '';
-                let t = token.replace(/['"“”‘’`]/g, '"');
-                t = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                t = t.replace(/"/g, '[\'\\"“”‘’`]?');
-                return t;
-            }).filter(Boolean);
-            return new RegExp(regexParts.join('(?:\\s|<[^>]+>|[\\*\\_\\~\\-.,;!?"\'\`])*'), 'i'); 
-        };
+        function levenshtein(a, b) {
+            if (a === b) return 0;
+            let l1 = a.length, l2 = b.length;
+            if (l1 === 0) return l2;
+            if (l2 === 0) return l1;
+            let prev = new Int32Array(l2 + 1);
+            let curr = new Int32Array(l2 + 1);
+            for (let j = 0; j <= l2; j++) prev[j] = j;
+            for (let i = 1; i <= l1; i++) {
+                curr[0] = i;
+                for (let j = 1; j <= l2; j++) {
+                    let cost = (a.charAt(i - 1) === b.charAt(j - 1)) ? 0 : 1;
+                    curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+                }
+                let temp = prev; prev = curr; curr = temp;
+            }
+            return prev[l2];
+        }
+
+        function getTokenSimilarity(t1, t2) {
+            if (t1 === t2) return 1.0;
+            if (t1.length >= 3 && t2.length >= 3) {
+                if (t1.startsWith(t2) || t2.startsWith(t1)) return 0.85;
+            }
+            const dist = levenshtein(t1, t2);
+            return 1 - (dist / Math.max(t1.length, t2.length));
+        }
+
+        function getTokensWithOffsets(text) {
+            const tokens = [];
+            const re = /[a-zA-Z0-9\u00C0-\u00FF]+/g;
+            let match;
+            while ((match = re.exec(text)) !== null) {
+                tokens.push({ text: match[0].toLowerCase(), start: match.index, end: re.lastIndex });
+            }
+            return tokens;
+        }
+
+        function findFuzzyRange(srcText, queryText, minScore = 0.72) {
+            const srcTokens = getTokensWithOffsets(srcText);
+            const queryTokens = queryText.toLowerCase().match(/[a-zA-Z0-9\u00C0-\u00FF]+/g) || [];
+            if (!queryTokens.length || !srcTokens.length) return null;
+
+            let bestScore = 0;
+            let bestStartIdx = -1;
+            let bestEndIdx = -1;
+
+            const minWinSize = Math.max(1, queryTokens.length - 1);
+            const maxWinSize = queryTokens.length + 1;
+
+            for (let winSize = minWinSize; winSize <= maxWinSize; winSize++) {
+                for (let i = 0; i <= srcTokens.length - winSize; i++) {
+                    const windowTokens = srcTokens.slice(i, i + winSize);
+                    let totalSim = 0;
+                    const compareCount = Math.max(queryTokens.length, windowTokens.length);
+                    for (let j = 0; j < compareCount; j++) {
+                        const qT = queryTokens[j];
+                        const wT = windowTokens[j]?.text;
+                        if (qT && wT) totalSim += getTokenSimilarity(qT, wT);
+                    }
+                    const score = totalSim / compareCount;
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestStartIdx = i;
+                        bestEndIdx = i + winSize - 1;
+                    }
+                }
+            }
+
+            if (bestScore >= minScore) {
+                return { start: srcTokens[bestStartIdx].start, end: srcTokens[bestEndIdx].end, score: bestScore };
+            }
+            return null;
+        }
+        // ─────────────────────────────────────────────────────────────
 
         let sepIdx = srch.indexOf(' || ');
         let sepLen = 4;
@@ -1614,42 +1761,32 @@ replacement text
             const endPart = srch.slice(sepIdx + sepLen).trim();
             
             if (startPart && endPart) {
-                try {
-                    const sRegex = createFuzzyRegex(startPart);
-                    const eRegex = createFuzzyRegex(endPart);
-                    
-                    const sMatch = src.match(sRegex);
-                    if (sMatch) {
-                        const remainingSrc = src.slice(sMatch.index + sMatch[0].length);
-                        const eMatch = remainingSrc.match(eRegex);
-                        if (eMatch) {
-                            const absoluteEnd = sMatch.index + sMatch[0].length + eMatch.index + eMatch[0].length;
-                            return {
-                                result: src.slice(0, sMatch.index) + repl + src.slice(absoluteEnd),
-                                matched: true
-                            };
-                        }
+                const startMatch = findFuzzyRange(src, startPart);
+                if (startMatch) {
+                    const remainingSrc = src.slice(startMatch.end);
+                    const endMatch = findFuzzyRange(remainingSrc, endPart);
+                    if (endMatch) {
+                        const absoluteEnd = startMatch.end + endMatch.end;
+                        return {
+                            result: src.slice(0, startMatch.start) + repl + src.slice(absoluteEnd),
+                            matched: true
+                        };
                     }
-                } catch(e) { console.warn("[ST-Copilot] Fuzzy regex error:", e); }
+                }
             }
         }
 
         if (srch.trim()) {
-            try {
-                const fullRegex = createFuzzyRegex(srch);
-                const fullMatch = src.match(fullRegex);
-                if (fullMatch) {
-                    return {
-                        result: src.slice(0, fullMatch.index) + repl + src.slice(fullMatch.index + fullMatch[0].length),
-                        matched: true
-                    };
-                }
-            } catch(e) { console.warn("[ST-Copilot] Fuzzy regex error:", e); }
+            const match = findFuzzyRange(src, srch);
+            if (match) {
+                return {
+                    result: src.slice(0, match.start) + repl + src.slice(match.end),
+                    matched: true
+                };
+            }
         }
 
-        const idx = src.indexOf(srch);
-        if (idx !== -1) return { result: src.slice(0, idx) + repl + src.slice(idx + srch.length), matched: true };
-
+        _dbgAdd('LB_PATCH_FUZZY_MATCH_FAILED', { search: srch, srcLength: src.length });
         return { result: src, matched: false };
     }
 
@@ -1668,7 +1805,16 @@ replacement text
         
         if (fieldId === 'user_persona') {
             const pu = window.power_user || ctx.powerUserSettings || {};
-            const avatar = pu.persona;
+            
+            let avatar = window.user_avatar || ctx.user_avatar || ctx.userAvatar || ctx.personaId || ctx.activePersonaId || ctx.active_persona_id;
+            if (!avatar && typeof document !== 'undefined') {
+                const selected = document.querySelector('#user_avatar_block .avatar-container.selected, #persona_container .avatar-container.selected, .persona_selected');
+                if (selected) avatar = selected.getAttribute('data-avatar-id') || selected.dataset?.avatarId;
+            }
+            if (typeof avatar === 'object' && avatar !== null) {
+                avatar = avatar.avatarId || avatar.avatar_id || avatar.user_avatar || avatar.userAvatar || avatar.id;
+            }
+
             if (avatar) {
                 try {
                     const res = await fetch('/api/characters/merge-attributes', {
@@ -1676,15 +1822,26 @@ replacement text
                         headers: { ...ctx.getRequestHeaders(), 'Content-Type': 'application/json' },
                         body: JSON.stringify({ avatar: avatar, data: { description: newValue }, is_persona: true })
                     });
-                    if (res.ok) {
-                        if (pu.personas && pu.personas[avatar]) pu.personas[avatar].description = newValue;
-                        return;
-                    }
                 } catch(e) { console.warn("Failed to merge persona API:", e); }
+                
+                if (pu.persona_descriptions && typeof pu.persona_descriptions === 'object') {
+                    if (typeof pu.persona_descriptions[avatar] === 'object') {
+                        pu.persona_descriptions[avatar].description = newValue;
+                    } else {
+                        pu.persona_descriptions[avatar] = newValue;
+                    }
+                }
+            } else {
+                pu.persona_description = newValue;
             }
-            if (pu.personas && pu.persona && pu.personas[pu.persona]) pu.personas[pu.persona].description = newValue;
-            else pu.persona_description = newValue;
+            
             if (typeof ctx.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
+            else if (typeof window.saveSettingsDebounced === 'function') window.saveSettingsDebounced();
+            
+            ['persona_description', 'user_persona_edit', 'user_persona_textarea', 'persona_description_textarea'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) { el.value = newValue; el.dispatchEvent(new Event('input', {bubbles:true})); }
+            });
             return;
         }
 
@@ -1693,6 +1850,11 @@ replacement text
             ctx.chatMetadata.note_prompt = newValue;
             if (typeof ctx.saveMetadata === 'function') ctx.saveMetadata();
             else saveSettings();
+            
+            ['note_prompt', 'note_textarea', 'chat_anote_textarea', 'anote_textarea', 'extension_floating_prompt'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) { el.value = newValue; el.dispatchEvent(new Event('input', {bubbles:true})); }
+            });
             return;
         }
 
@@ -2433,11 +2595,11 @@ replacement text
                         editPanel.appendChild(pHdr);
 
                         const searchTa = document.createElement('textarea');
-                        searchTa.className = 'scp-lb-pe-textarea'; searchTa.rows = 3; searchTa.value = patch.search || '';
-                        searchTa.addEventListener('input', () => {
-                            change.patches[pi].search = searchTa.value;
-                            if (char) { const { valid } = validateReplaceChange(change); applyBtn.disabled = !valid; }
-                            refreshPreview();
+                        searchTa.className = 'scp-lb-pe-textarea'; searchTa.rows = 2; searchTa.value = patch.search || '';
+                        searchTa.placeholder = 'first unique words || last unique words';
+                        searchTa.addEventListener('input', () => { 
+                            editableChanges[ci].patches[pi].search = searchTa.value; 
+                            _validateBookEntry(_selectedBook).catch(()=>{}); 
                         });
                         editPanel.appendChild(mkRow('Anchor', searchTa));
 
@@ -2578,6 +2740,8 @@ replacement text
             const data = JSON.parse(fixed);
             if (Array.isArray(data.changes)) return _sanitizeLBChanges(data.changes);
         } catch (_) {}
+
+        if (raw) _dbgAdd('LB_PROPOSAL_PARSING_FAILED', { rawText: raw.slice(0, 300) + (raw.length > 300 ? '...' : '') });
         return null;
     }
 
@@ -2591,7 +2755,7 @@ replacement text
         const valid = [];
         for (const c of changes) {
             if (!c || typeof c !== 'object') continue;
-            if (!['add', 'edit', 'patch', 'delete'].includes(c.action)) continue;
+            if (!['add', 'edit', 'patch', 'prepend', 'append', 'delete'].includes(c.action)) continue;
             if (!c.worldName && !c.name && c.uid == null) continue;
             if (c.triggers === 'original' || c.triggers === 'keep' || c.triggers === undefined || c.triggers === null) {
                 c.triggers = null;
@@ -2710,6 +2874,7 @@ replacement text
                 else if (typeof window.printWorldInfoCharacters === 'function') window.printWorldInfoCharacters();
             }
         } catch (e) {
+            _dbgAdd('LB_AUTO_BIND_NEW_BOOK_FAILED', { bookName, error: e.message });
             console.error(`[ST-Copilot-Debug] Exception in bindNewLorebookToCharacter:`, e);
         }
     }
@@ -2754,6 +2919,10 @@ replacement text
                 if (cStr === fuzzyName) return true;
                 return cStr.includes(fuzzyName) || fuzzyName.includes(cStr);
             });
+        }
+
+        if (!origEntry && /^\d+$/.test(fuzzyName) && data && data.entries[fuzzyName]) {
+            origEntry = data.entries[fuzzyName];
         }
 
         if (!origEntry && fuzzyName && !strictBook) {
@@ -2877,6 +3046,16 @@ replacement text
                 continue;
             }
 
+            if (change.action === 'add' && data) {
+                const exists = Object.values(data.entries).find(e => e.comment && e.comment.toLowerCase() === (change.name || '').toLowerCase());
+                if (exists) {
+                    _dbgAdd('LB_ADD_CONVERTED_TO_EDIT', { bookName, change, originalUid: exists.uid });
+                    change.action = 'edit';
+                    change.uid = exists.uid;
+                    origEntry = exists;
+                }
+            }
+
             if (change.action === 'add') {
                 const uids = Object.keys(data.entries).map(Number);
                 const newUid = uids.length ? Math.max(...uids) + 1 : 1;
@@ -2921,6 +3100,7 @@ replacement text
                 if (!origEntry) {
                     const msg = `Entry not found for patch: "${change.name || change.uid || '?'}" in "${bookName}"`;
                     toastr.error(`[LB] ${msg}`, EXT_DISPLAY, { timeOut: 10000 });
+                    _dbgAdd('LB_PATCH_ERROR_NOT_FOUND', { bookName, change });
                     continue;
                 }
                 let current = origEntry.content || '';
@@ -2943,6 +3123,24 @@ replacement text
                 }
                 if (change.constant !== undefined) origEntry.constant = !!change.constant;
                 console.log(`[${EXT_DISPLAY}] applyLBChanges: PATCH uid=${origEntry.uid} in "${bookName}"`);
+                bookCache[bookName] = data;
+                _wiCache[bookName] = data;
+                successfulChanges.push(change);
+            } else if (change.action === 'prepend' || change.action === 'append') {
+                if (!origEntry) {
+                    toastr.error(`[LB] Entry not found for ${change.action}: "${change.name || change.uid || '?'}" in "${bookName}"`, EXT_DISPLAY, { timeOut: 10000 });
+                    continue;
+                }
+                let current = origEntry.content || '';
+                origEntry.content = change.action === 'prepend' ? (change.content || '') + current : current + (change.content || '');
+                
+                if (change.name !== undefined) origEntry.comment = change.name;
+                if (change.triggers !== null && change.triggers !== undefined) {
+                    origEntry.key = change.triggers;
+                    if (change.triggers.length === 0 && change.constant !== false) origEntry.constant = true;
+                }
+                if (change.constant !== undefined) origEntry.constant = !!change.constant;
+                console.log(`[${EXT_DISPLAY}] applyLBChanges: ${change.action.toUpperCase()} uid=${origEntry.uid} in "${bookName}"`);
                 bookCache[bookName] = data;
                 _wiCache[bookName] = data;
                 successfulChanges.push(change);
@@ -3152,6 +3350,8 @@ replacement text
     }
 
     function openTextDiffModal(title, originalText, newText) {
+        _dbgAdd('LB_DIFF_MODAL_TOGGLE', { title });
+
         const modal = document.getElementById('scp-diff-modal');
         if (!modal) return;
         
@@ -3188,6 +3388,10 @@ replacement text
                 current = result;
             }
             newContent = current;
+        } else if (change.action === 'prepend' && originalEntry) {
+            newContent = (change.content || '') + originalContent;
+        } else if (change.action === 'append' && originalEntry) {
+            newContent = originalContent + (change.content || '');
         }
         
         const entryName = change.name || originalEntry?.comment || `Entry #${change.uid || '?'}`;
@@ -3499,7 +3703,7 @@ replacement text
                 if (Array.isArray(change.msg_indices) && change.msg_indices.length) {
                     let allSuccess = true;
                     const sortedIndices = [...change.msg_indices].sort((a, b) =>
-                        change.action === 'delete' ? b - a : a - b // delete in reverse to preserve indices
+                        change.action === 'delete' ? b - a : a - b
                     );
                     for (const idx of sortedIndices) {
                         if (idx < 0 || idx >= msgs.length) {
@@ -3684,6 +3888,7 @@ replacement text
         };
 
         const validateChatChange = (change) => {
+            const stMsgs = SillyTavern.getContext().chat || [];
             if (change.action === 'add') {
                 if (!['user', 'assistant', 'system'].includes(change.role)) return { valid: false, reason: 'Invalid role' };
                 if (change.msg_index < 0 || change.msg_index > stMsgs.length + 1) return { valid: false, reason: 'Index out of bounds' };
@@ -3884,6 +4089,8 @@ replacement text
                 diffBtn.className = 'scp-lb-proposal-diff-btn'; diffBtn.title = 'View diff'; diffBtn.innerHTML = I.diff;
                 diffBtn.addEventListener('click', e => {
                     e.stopPropagation();
+                    const ctx = SillyTavern.getContext();
+                    const stMsgs = ctx.chat || [];
                     const change = editableChanges[ci];
                     let targetIdxList = [];
                     if (Array.isArray(change.msg_indices) && change.msg_indices.length) {
@@ -3892,10 +4099,10 @@ replacement text
                         let startIdx = change.msg_index !== undefined ? change.msg_index : (change.msg_range ? change.msg_range[0] : null);
                         let endIdx = change.msg_index !== undefined ? change.msg_index : (change.msg_range ? change.msg_range[1] : null);
                         if (startIdx === null || endIdx === null) { toastr.warning('Message index not specified.', EXT_DISPLAY); return; }
-                        for (let i = startIdx; i <= endIdx; i++) { if (stMsgs[i]) targetIdxList.push(i); }
+                        for (let i = Math.max(0, startIdx); i <= Math.min(stMsgs.length - 1, endIdx); i++) { if (stMsgs[i]) targetIdxList.push(i); }
                     }
 
-                    if (!targetIdxList.length) { toastr.warning('Message index not specified.', EXT_DISPLAY); return; }
+                    if (!targetIdxList.length) { toastr.warning(`Message(s) not found — chat may have changed since this proposal was generated.`, EXT_DISPLAY, { timeOut: 7000 }); return; }
                     
                     let origCombined = [];
                     let newCombined = [];
@@ -4223,6 +4430,1058 @@ replacement text
         else msgEl.after(card);
     }
 
+    // ─── Memory System ───────────────────────────────────────────────────────────
+
+    function genMemoryId() { return 'mem_' + Date.now() + '_' + Math.random().toString(36).slice(2,6); }
+
+    function getMemories() {
+        const s = getSettings();
+        if (!s.memories || typeof s.memories !== 'object') s.memories = {};
+        return s.memories;
+    }
+
+    function getVisibleMemories() {
+        const { charId, chatId } = getBindingKey();
+        const sessionId = getCurrentSession()?.id;
+        const all = Object.values(getMemories());
+        
+        return all.filter(m => {
+            if (m.disabled) return false;
+            if (m.scope === 'global') return true;
+            if (m.scope === 'character') return m.charId === charId;
+            if (m.scope === 'chat') return m.charId === charId && m.chatId === chatId;
+            if (m.scope === 'session') return m.charId === charId && m.chatId === chatId && m.sessionId === sessionId;
+            return m.charId === charId; // fallback
+        });
+    }
+
+    function addMemory(key, value, scope = 'character') {
+        const { charId, chatId } = getBindingKey();
+        const ctx = SillyTavern.getContext();
+        const charName = ctx.characters?.[charId]?.name || charId || 'Unknown Character';
+        const chatName = chatId || 'Unknown Chat';
+        const sessionObj = getCurrentSession();
+        const sessionId = sessionObj?.id;
+        const sessionName = sessionObj?.name || sessionId || 'Unknown Session';
+        
+        const id = genMemoryId();
+        getMemories()[id] = {
+            id, key: key.trim(), value: value.trim(),
+            createdAt: Date.now(),
+            scope: ['global', 'character', 'chat', 'session'].includes(scope) ? scope : 'character',
+            charId, charName,
+            chatId, chatName,
+            sessionId, sessionName,
+            disabled: false
+        };
+        saveSettings();
+        updateMemoryDot();
+        return id;
+    }
+
+    function updateMemory(id, key, value) {
+        const mem = getMemories()[id];
+        if (!mem) return;
+        mem.key = key.trim();
+        mem.value = value.trim();
+        mem.updatedAt = Date.now();
+        saveSettings();
+    }
+
+    function deleteMemory(id) {
+        _dbgAdd('MEM_DELETE', { id });
+        
+        delete getMemories()[id];
+        saveSettings();
+        updateMemoryDot();
+    }
+
+    function clearAllMemories() {
+        _dbgAdd('MEM_CLEAR_ALL');
+
+        getSettings().memories = {};
+        saveSettings();
+        updateMemoryDot();
+    }
+
+    function updateMemoryDot() {
+        const has = Object.keys(getMemories()).length > 0;
+        document.getElementById('scp-sp-memory-dot')?.style.setProperty('display', has ? '' : 'none');
+    }
+
+    function buildMemoryContextBlock() {
+        const s = getSettings();
+        if (!s.memoryEnabled || !s.memoryInject) return '';
+        const mems = getVisibleMemories();
+        if (!mems.length) return '';
+        
+        const lines = mems.map(m => `[${m.scope.toUpperCase()}][${m.key}]: ${m.value}`).join('\n');
+            
+        return `\n\n<persistent_memory>\nThese are facts about the user that you should remember and reference when relevant:\n${lines}\n</persistent_memory>`;
+    }
+    function buildMemoryAIInstructions() {
+        const s = getSettings();
+        if (!s.memoryEnabled) return '';
+        const rawPrompt = s.memoryManagePrompt || DEFAULT_MEMORY_PROMPT;
+        
+        const mems = getVisibleMemories();
+        let memsText = 'None';
+        if (mems.length > 0) {
+            const grouped = {};
+            for (const m of mems) {
+                if (!grouped[m.scope]) grouped[m.scope] = [];
+                grouped[m.scope].push(`"${m.key}"`);
+            }
+            memsText = Object.entries(grouped)
+                .map(([scope, keys]) => `- ${scope.toUpperCase()}: "${keys.join('", ')}`)
+                .join('\n');
+        }
+        
+        return '\n\n' + rawPrompt
+            .replace('{{memory_format}}', MEMORY_FORMAT_BLOCK)
+            .replace('{{current_memories}}', memsText);
+    }
+
+    function parseMemoryBlockFromText(text) {
+        const re = new RegExp('```memory-update\\s*([\\s\\S]*?)```', 'i');
+        const m = text.match(re);
+        if (!m) return null;
+        try { return JSON.parse(m[1].trim()); } catch(_) {}
+        try { const fixed = m[1].trim().replace(/,\s*]/g, ']').replace(/,\s*}/g, '}'); return JSON.parse(fixed); } 
+        catch(_) { 
+            _dbgAdd('MEM_AI_UPDATE_BLOCK_FAILED', { raw: m[1] });
+            return null; 
+        }
+    }
+
+    function stripMemoryBlock(text) {
+        return text.replace(/```memory-update[\s\S]*?```/gi, '').trim();
+    }
+
+    function processMemoryUpdates(text, msgId) {
+        const s = getSettings();
+        if (!s.memoryEnabled) return;
+        const changes = parseMemoryBlockFromText(text);
+        if (!changes?.length) return;
+        const applied = [];
+        for (const ch of changes) {
+            if (ch.action === 'add' && ch.key && ch.value) {
+                const targetScope = ['global', 'character', 'chat', 'session'].includes(ch.scope) ? ch.scope : 'character';
+                const mem = getVisibleMemories().find(m => m.scope === targetScope && m.key === ch.key);
+                
+                if (mem) {
+                    const newVal = mem.value + '\n' + ch.value;
+                    updateMemory(mem.id, ch.key, newVal);
+                    applied.push({ action: 'update', key: ch.key, value: newVal });
+                } else {
+                    addMemory(ch.key, ch.value, ch.scope);
+                    applied.push({ action: 'add', key: ch.key, value: ch.value });
+                }
+            } else if ((ch.action === 'edit' || ch.action === 'update') && ch.scope && ch.key && ch.value) {
+                const mem = getVisibleMemories().find(m => m.scope === ch.scope && m.key === ch.key);
+                if (mem) {
+                    updateMemory(mem.id, ch.key, ch.value);
+                    applied.push({ action: 'update', key: ch.key, value: ch.value });
+                }
+            } else if (ch.action === 'delete' && ch.scope && ch.key) {
+                const mem = getVisibleMemories().find(m => m.scope === ch.scope && m.key === ch.key);
+                if (mem) { applied.push({ action: 'delete', key: mem.key }); deleteMemory(mem.id); }
+            } else {
+                if (ch.action && !['add', 'edit', 'update', 'delete'].includes(ch.action)) {
+                    _dbgAdd('MEM_AI_ACTION_UNKNOWN', { action: ch.action });
+                } else if (ch.scope && !['global', 'character', 'chat', 'session'].includes(ch.scope)) {
+                    _dbgAdd('MEM_SCOPE_INVALID', { scope: ch.scope });
+                }
+            }
+        }
+        if (applied.length) {
+            if (s.memoryNotify) showMemoryToast(applied);
+            if (document.getElementById('scp-sp-pane-memory')?.style.display !== 'none') renderMemoryList();
+        }
+    }
+
+    function showMemoryToast(applied) {
+        const existing = document.querySelector('.scp-memory-toast');
+        if (existing) existing.remove();
+        const toast = document.createElement('div');
+        toast.className = 'scp-memory-toast';
+        const icons = { add: '✦', update: '✎', delete: '✕' };
+        const lines = applied.slice(0, 3).map(a => `${icons[a.action] || '·'} ${escHtml(a.key)}: ${escHtml((a.value || '(deleted)').slice(0, 60))}`).join("\n");
+        const linesHtml = lines.split("\n").join("<br>");
+        toast.innerHTML = `<span class="scp-memory-toast-icon"><i class="fa-solid fa-brain"></i></span><div class="scp-memory-toast-body"><div class="scp-memory-toast-title">Memory Updated (${applied.length})</div><div class="scp-memory-toast-text">${linesHtml}</div></div>`;
+        document.body.appendChild(toast);
+        toast.style.cursor = 'pointer';
+        toast.addEventListener('click', () => {
+            _dbgAdd('MEM_TOAST_DISMISS', { reason: 'click' });
+            toast.remove();
+        });
+        setTimeout(() => {
+            toast.style.animation = 'scp-toast-out 0.25s ease forwards';
+            setTimeout(() => {
+                _dbgAdd('MEM_TOAST_DISMISS', { reason: 'timeout' });
+                toast.remove();
+            }, 260);
+        }, 12000);
+    }
+
+    function renderMemoryList() {
+        const listEl = document.getElementById('scp-sp-memory-list');
+        const emptyEl = document.getElementById('scp-sp-memory-empty');
+        if (!listEl) return;
+        
+        const allMems = Object.values(getMemories()).sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+        listEl.innerHTML = '';
+        
+        if (!allMems.length) {
+            if (emptyEl) emptyEl.style.display = '';
+            return;
+        }
+        if (emptyEl) emptyEl.style.display = 'none';
+
+        const tree = { global: [], characters: {} };
+
+        allMems.forEach(m => {
+            if (m.scope === 'global' || !m.scope) {
+                tree.global.push(m);
+            } else {
+                const charId = m.charId || 'unknown';
+                if (!tree.characters[charId]) {
+                    tree.characters[charId] = { name: m.charName || charId, memories: [], chats: {} };
+                }
+                const charNode = tree.characters[charId];
+
+                if (m.scope === 'character') {
+                    charNode.memories.push(m);
+                } else {
+                    const chatId = m.chatId || 'unknown';
+                    if (!charNode.chats[chatId]) {
+                        charNode.chats[chatId] = { name: m.chatName || chatId, memories: [], sessions: {} };
+                    }
+                    const chatNode = charNode.chats[chatId];
+
+                    if (m.scope === 'chat') {
+                        chatNode.memories.push(m);
+                    } else if (m.scope === 'session') {
+                        const sessionId = m.sessionId || 'unknown';
+                        if (!chatNode.sessions[sessionId]) {
+                            chatNode.sessions[sessionId] = { name: m.sessionName || sessionId, memories: [] };
+                        }
+                        chatNode.sessions[sessionId].memories.push(m);
+                    }
+                }
+            }
+        });
+
+        const createMemEl = (mem) => {
+            const item = document.createElement('div');
+            item.className = 'scp-memory-item';
+            if (mem.disabled) item.style.opacity = '0.5';
+            item.dataset.id = mem.id;
+            
+            const isNew = (Date.now() - (mem.createdAt || 0)) < 5000;
+            if (isNew) {
+                const dot = document.createElement('div');
+                dot.className = 'scp-memory-new-badge';
+                item.appendChild(dot);
+            }
+
+            const timeStr = mem.updatedAt
+                ? `Updated ${new Date(mem.updatedAt).toLocaleString()}`
+                : `Added ${new Date(mem.createdAt || 0).toLocaleString()}`;
+
+            item.innerHTML += `
+                <div class="scp-memory-item-body">
+                    <div class="scp-memory-item-key">${escHtml(mem.key)}</div>
+                    <div class="scp-memory-item-val-ph"></div>
+                    <div class="scp-memory-item-meta">${escHtml(timeStr)}</div>
+                </div>
+                <div class="scp-memory-item-actions">
+                    <button class="scp-memory-item-toggle" title="${mem.disabled ? 'Enable Memory' : 'Disable Memory'}">
+                        <i class="fa-solid ${mem.disabled ? 'fa-toggle-off' : 'fa-toggle-on'}"></i>
+                    </button>
+                    <button class="scp-memory-item-edit" title="Edit"><i class="fa-solid fa-pen"></i></button>
+                    <button class="scp-memory-item-del" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                </div>
+            `;
+            const valEl = document.createElement('div');
+            valEl.className = 'scp-memory-item-val';
+            const isLong = mem.value.length > 120;
+            valEl.textContent = isLong ? mem.value.slice(0, 120) + '…' : mem.value;
+            if (isLong) {
+                valEl.style.cursor = 'pointer';
+                valEl.title = 'Click to expand';
+                let expanded = false;
+                valEl.addEventListener('click', e => {
+                    e.stopPropagation();
+                    expanded = !expanded;
+                    valEl.textContent = expanded ? mem.value : mem.value.slice(0, 120) + '…';
+                    valEl.title = expanded ? 'Click to collapse' : 'Click to expand';
+                });
+            }
+            item.querySelector('.scp-memory-item-val-ph').replaceWith(valEl);
+            
+            item.querySelector('.scp-memory-item-toggle').addEventListener('click', e => {
+                e.stopPropagation();
+                mem.disabled = !mem.disabled;
+
+                _dbgAdd('MEM_TOGGLE_DISABLE', { id: mem.id, disabled: mem.disabled });
+
+                saveSettings();
+                renderMemoryList();
+            });
+
+            item.querySelector('.scp-memory-item-edit').addEventListener('click', async e => {
+                e.stopPropagation();
+                await editMemoryDialog(mem.id);
+            });
+            
+            item.querySelector('.scp-memory-item-del').addEventListener('click', async e => {
+                e.stopPropagation();
+                const ok = await showCustomDialog({ type: 'confirm', title: 'Delete Memory', message: `Delete memory "${mem.key}"?` });
+                if (!ok) return;
+                deleteMemory(mem.id);
+                renderMemoryList();
+            });
+            return item;
+        };
+
+        const buildDetails = (title, icon, contentEls, open = false) => {
+            if (!contentEls || contentEls.length === 0) return null;
+            const det = document.createElement('details');
+            det.className = 'scp-mem-tree-details';
+            if (open) det.open = true;
+            const sum = document.createElement('summary');
+            sum.className = 'scp-mem-tree-summary';
+            sum.innerHTML = `<i class="fa-solid fa-${icon}"></i> ${escHtml(title)}`;
+            const content = document.createElement('div');
+            content.className = 'scp-mem-tree-content';
+            contentEls.forEach(el => content.appendChild(el));
+            det.appendChild(sum);
+            det.appendChild(content);
+            return det;
+        };
+
+        if (tree.global.length > 0) {
+            const globDet = buildDetails('Global', 'globe', tree.global.map(createMemEl), true);
+            if (globDet) listEl.appendChild(globDet);
+        }
+
+        const charKeys = Object.keys(tree.characters);
+        if (charKeys.length > 0) {
+            const charContent = [];
+            
+            charKeys.forEach(charId => {
+                const cNode = tree.characters[charId];
+                const nodeContent = [];
+                
+                cNode.memories.forEach(m => nodeContent.push(createMemEl(m)));
+                
+                const chatKeys = Object.keys(cNode.chats);
+                if (chatKeys.length > 0) {
+                    const chatsWrapper = [];
+                    chatKeys.forEach(chatId => {
+                        const chatNode = cNode.chats[chatId];
+                        const chatContent = [];
+                        chatNode.memories.forEach(m => chatContent.push(createMemEl(m)));
+                        
+                        const sessKeys = Object.keys(chatNode.sessions);
+                        if (sessKeys.length > 0) {
+                            const sessWrapper = [];
+                            sessKeys.forEach(sessId => {
+                                const sNode = chatNode.sessions[sessId];
+                                const sEls = sNode.memories.map(createMemEl);
+                                const sDet = buildDetails(sNode.name, 'bolt', sEls);
+                                if (sDet) sessWrapper.push(sDet);
+                            });
+                            if (sessWrapper.length > 0) {
+                                const sMainDet = buildDetails('Sessions', 'layer-group', sessWrapper);
+                                if (sMainDet) chatContent.push(sMainDet);
+                            }
+                        }
+                        
+                        const cDet = buildDetails(chatNode.name, 'comments', chatContent);
+                        if (cDet) chatsWrapper.push(cDet);
+                    });
+                    
+                    if (chatsWrapper.length > 0) {
+                        const cMainDet = buildDetails('Chats', 'folder', chatsWrapper);
+                        if (cMainDet) nodeContent.push(cMainDet);
+                    }
+                }
+                
+                const charDet = buildDetails(cNode.name, 'user', nodeContent, true);
+                if (charDet) charContent.push(charDet);
+            });
+            
+            const charsMainDet = buildDetails('Characters', 'users', charContent, true);
+            if (charsMainDet) listEl.appendChild(charsMainDet);
+        }
+    }
+
+    async function editMemoryDialog(id) {
+        const mem = id ? getMemories()[id] : null;
+        const isNew = !id;
+        const result = await new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.className = 'scp-dialog-overlay';
+            
+            const scopeOptions = [
+                {val: 'global', text: 'Global (All chats)'},
+                {val: 'character', text: 'Character (All chats with this character)'},
+                {val: 'chat', text: 'Chat (Only this specific chat)'},
+                {val: 'session', text: 'Session (Only this Copilot session)'}
+            ];
+            const currentScope = mem?.scope || 'character';
+
+            const scopeHtml = scopeOptions.map(o => `<option value="${o.val}" ${currentScope === o.val ? 'selected' : ''}>${o.text}</option>`).join('');
+
+            overlay.innerHTML = `<div class="scp-dialog-box">
+<div class="scp-dialog-title">${isNew ? 'Add Memory' : 'Edit Memory'}</div>
+<div class="scp-dialog-msg">Category / Key:</div>
+<input type="text" class="scp-dialog-input" id="scp-mem-key-inp" placeholder="e.g. Preferences, About Me, Profession..." value="${escHtml(mem?.key || '')}">
+<div class="scp-dialog-msg" style="margin-top:4px">Value:</div>
+<textarea class="scp-dialog-input" id="scp-mem-val-inp" rows="3" placeholder="What to remember..." style="height:auto;resize:vertical;margin-bottom:10px;">${escHtml(mem?.value || '')}</textarea>
+<div class="scp-dialog-msg" style="margin-top:4px">Scope:</div>
+<select class="scp-dialog-input" id="scp-mem-scope-inp" style="margin-bottom:20px;">
+    ${scopeHtml}
+</select>
+<div class="scp-dialog-btns">
+  <button class="scp-dialog-btn scp-dialog-cancel">Cancel</button>
+  <button class="scp-dialog-btn scp-dialog-ok">${isNew ? 'Add' : 'Save'}</button>
+</div></div>`;
+            document.body.appendChild(overlay);
+            const keyInp = overlay.querySelector('#scp-mem-key-inp');
+            const valInp = overlay.querySelector('#scp-mem-val-inp');
+            const scopeInp = overlay.querySelector('#scp-mem-scope-inp');
+            const okBtn = overlay.querySelector('.scp-dialog-ok');
+            const cancelBtn = overlay.querySelector('.scp-dialog-cancel');
+            const close = val => { overlay.classList.remove('visible'); setTimeout(() => overlay.remove(), 150); resolve(val); };
+            keyInp.focus();
+            okBtn.addEventListener('click', () => close({ key: keyInp.value, value: valInp.value, scope: scopeInp.value }));
+            cancelBtn.addEventListener('click', () => close(null));
+            overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+            keyInp.addEventListener('keydown', e => { if (e.key === 'Tab') { e.preventDefault(); valInp.focus(); } });
+            requestAnimationFrame(() => overlay.classList.add('visible'));
+        });
+        
+        if (!result?.key?.trim() || !result?.value?.trim()) return;
+
+        _dbgAdd(isNew ? 'MEM_CREATE_MANUAL' : 'MEM_EDIT_MANUAL', { key: result.key, scope: result.scope });
+        
+        if (isNew) { addMemory(result.key, result.value, result.scope); }
+        else { 
+            const m = getMemories()[id];
+            updateMemory(id, result.key, result.value);
+            m.scope = result.scope; 
+            const { charId, chatId } = getBindingKey();
+            const ctx = SillyTavern.getContext();
+            m.charId = charId;
+            m.charName = ctx.characters?.[charId]?.name || charId;
+            m.chatId = chatId;
+            m.chatName = chatId;
+            m.sessionId = getCurrentSession()?.id;
+            m.sessionName = getCurrentSession()?.name;
+            saveSettings();
+        }
+        renderMemoryList();
+    }
+
+    function setupMemorySettingsUI() {
+        const s = getSettings();
+        
+        const bindCheck = (id, key) => {
+            const el = document.getElementById(id); if (!el) return;
+            const newEl = el.cloneNode(true); 
+            el.parentNode.replaceChild(newEl, el);
+            newEl.checked = !!s[key];
+            newEl.addEventListener('change', () => {
+                getSettings()[key] = newEl.checked;
+                saveSettings();
+            });
+        };
+        
+        bindCheck('scp-sp-memory-enabled', 'memoryEnabled');
+        bindCheck('scp-sp-memory-inject', 'memoryInject');
+        bindCheck('scp-sp-memory-notify', 'memoryNotify');
+
+        const promptEl = document.getElementById('scp-sp-memory-prompt');
+        if (promptEl) {
+            promptEl.value = s.memoryManagePrompt || DEFAULT_MEMORY_PROMPT;
+            const newPromptEl = promptEl.cloneNode(true);
+            promptEl.parentNode.replaceChild(newPromptEl, promptEl);
+            newPromptEl.addEventListener('input', () => {
+                getSettings().memoryManagePrompt = newPromptEl.value;
+                saveSettings();
+                const stEl = document.getElementById('scp-memory-prompt');
+                if (stEl) stEl.value = newPromptEl.value;
+            });
+        }
+
+        const resetBtn = document.getElementById('scp-sp-reset-memory-prompt');
+        if (resetBtn) {
+            const newResetBtn = resetBtn.cloneNode(true);
+            resetBtn.parentNode.replaceChild(newResetBtn, resetBtn);
+            newResetBtn.addEventListener('click', async () => {
+                const ok = await showCustomDialog({ type: 'confirm', title: 'Reset Prompt', message: 'Reset memory prompt to default?' });
+                if (!ok) return;
+                getSettings().memoryManagePrompt = DEFAULT_MEMORY_PROMPT;
+                saveSettings();
+                const el = document.getElementById('scp-sp-memory-prompt'); if (el) el.value = DEFAULT_MEMORY_PROMPT;
+                const stEl = document.getElementById('scp-memory-prompt'); if (stEl) stEl.value = DEFAULT_MEMORY_PROMPT;
+                toastr.success('Prompt reset.', EXT_DISPLAY);
+            });
+        }
+
+        const addBtn = document.getElementById('scp-sp-memory-add-btn');
+        if (addBtn) {
+            const newAddBtn = addBtn.cloneNode(true);
+            addBtn.parentNode.replaceChild(newAddBtn, addBtn);
+            newAddBtn.addEventListener('click', async () => {
+                await editMemoryDialog(null);
+            });
+        }
+        
+        const clearBtn = document.getElementById('scp-sp-memory-clear-all');
+        if (clearBtn) {
+            const newClearBtn = clearBtn.cloneNode(true);
+            clearBtn.parentNode.replaceChild(newClearBtn, clearBtn);
+            newClearBtn.addEventListener('click', async () => {
+                const count = Object.keys(getMemories()).length;
+                if (!count) { toastr.info('No memories to clear.', EXT_DISPLAY); return; }
+                const ok = await showCustomDialog({ type: 'confirm', title: 'Clear All Memories', message: `Delete all ${count} stored memories? This cannot be undone.`, delayConfirm: 2 });
+                if (!ok) return;
+                clearAllMemories();
+                renderMemoryList();
+                toastr.success('All memories cleared.', EXT_DISPLAY);
+            });
+        }
+
+        renderMemoryList();
+        updateMemoryDot();
+    }
+
+    // ─── Tool Calls Engine ───────────────────────────────────────────────────────
+
+    const TOOL_DEFINITIONS = [
+        {
+            id: 'search_chat',
+            name: 'search_chat',
+            label: 'Search Chat History',
+            icon: 'fa-comments',
+            description: 'Search for messages in the main chat. Supports fuzzy matching and regex. Returns message indices for use in chat edits.',
+            settingKey: 'toolsEnabled_search_chat',
+            schema: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string', description: 'Text or regex to search for (prefix with / for regex, e.g. /hello.*/i)' },
+                    role: { type: 'string', enum: ['all', 'user', 'assistant'], description: 'Which messages to search' },
+                    from_index: { type: 'number', description: 'Start search from this message index (optional)' },
+                    to_index: { type: 'number', description: 'End search at this message index (optional)' },
+                    max_results: { type: 'number', description: 'Maximum number of results to return (default 10)' },
+                    include_content: { type: 'boolean', description: 'Include full message content in results (default true)' },
+                },
+                required: ['query'],
+            },
+        },
+        {
+            id: 'search_lorebook',
+            name: 'search_lorebook',
+            label: 'Search Lorebook',
+            icon: 'fa-book',
+            description: 'Search for entries in active lorebooks by name, keyword, or content.',
+            settingKey: 'toolsEnabled_search_lorebook',
+            schema: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string', description: 'Text to search for in entry names, keys, and content' },
+                    book_name: { type: 'string', description: 'Specific lorebook name to search (optional)' },
+                    search_in: { type: 'string', enum: ['all', 'name', 'keys', 'content'], description: 'Where to search (default: all)' },
+                },
+                required: ['query'],
+            },
+        },
+        {
+            id: 'ask_user',
+            name: 'ask_user',
+            label: 'Ask User',
+            icon: 'fa-circle-question',
+            description: 'Pause generation and ask the user a question before continuing. Requires streaming to be enabled.',
+            settingKey: 'toolsEnabled_ask_user',
+            schema: {
+                type: 'object',
+                properties: {
+                    question: { type: 'string', description: 'The question to ask the user' },
+                    context: { type: 'string', description: 'Why you need this information (shown to user)' },
+                },
+                required: ['question'],
+            },
+        },
+        {
+            id: 'get_char_info',
+            name: 'get_char_info',
+            label: 'Get Character Info',
+            icon: 'fa-user-pen',
+            description: 'Retrieve detailed information about the current character card fields.',
+            settingKey: 'toolsEnabled_get_char_info',
+            schema: {
+                type: 'object',
+                properties: {
+                    fields: { type: 'array', items: { type: 'string' }, description: 'Which fields to retrieve: description, personality, scenario, first_mes, mes_example, tags, authors_note, alternate_greetings' },
+                },
+                required: ['fields'],
+            },
+        },
+        {
+            id: 'get_chat_stats',
+            name: 'get_chat_stats',
+            label: 'Get Chat Statistics',
+            icon: 'fa-chart-bar',
+            description: 'Get statistics about the current chat: message count, approximate tokens, character/user distribution.',
+            settingKey: 'toolsEnabled_get_chat_stats',
+            schema: { type: 'object', properties: {} },
+        },
+        {
+            id: 'get_recent_messages',
+            name: 'get_recent_messages',
+            label: 'Get Recent Messages',
+            icon: 'fa-list',
+            description: 'Retrieve recent messages with their indices. Useful when you need precise message numbers for edits.',
+            settingKey: 'toolsEnabled_get_recent_messages',
+            schema: {
+                type: 'object',
+                properties: {
+                    count: { type: 'number', description: 'Number of recent messages to retrieve (default 10, max 50)' },
+                    from_end: { type: 'boolean', description: 'If true, count from end of chat (default true)' },
+                    role: { type: 'string', enum: ['all', 'user', 'assistant'], description: 'Filter by role (default all)' },
+                },
+            },
+        },
+    ];
+
+    function getEnabledTools() {
+        const s = getSettings();
+        if (!s.toolsEnabled) return [];
+        return TOOL_DEFINITIONS.filter(t => s[t.settingKey] !== false);
+    }
+
+    function buildAnthropicToolsPayload() {
+        return getEnabledTools().map(t => ({
+            name: t.name,
+            description: t.label + ': ' + t.description,
+            input_schema: t.schema,
+        }));
+    }
+
+    // Execute a single tool call
+    async function executeTool(toolName, toolInput) {
+        const ctx = SillyTavern.getContext();
+        switch (toolName) {
+            case 'search_chat': {
+                const msgs = ctx.chat || [];
+                const query = toolInput.query || '';
+                const role = toolInput.role || 'all';
+                const fromIdx = toolInput.from_index ?? 0;
+                const toIdx = toolInput.to_index ?? msgs.length - 1;
+                const maxResults = Math.min(toolInput.max_results ?? 10, 50);
+                const includeContent = toolInput.include_content !== false;
+                let isRegex = false, re = null;
+                const regexMatch = query.match(/^\/(.+)\/([gimsuy]*)$/);
+                if (regexMatch) {
+                    try { re = new RegExp(regexMatch[1], regexMatch[2]); isRegex = true; } catch(_) {}
+                }
+                const results = [];
+                const lq = query.toLowerCase();
+                for (let i = Math.max(0, fromIdx); i <= Math.min(msgs.length - 1, toIdx); i++) {
+                    const m = msgs[i];
+                    if (role === 'user' && !m.is_user) continue;
+                    if (role === 'assistant' && m.is_user) continue;
+                    const text = m.mes || '';
+                    let matched = false;
+                    if (isRegex && re) { re.lastIndex = 0; matched = re.test(text); }
+                    else {
+                        matched = text.toLowerCase().includes(lq);
+                        if (!matched) {
+                            // Fuzzy: split into tokens
+                            const tokens = lq.split(/\s+/).filter(Boolean);
+                            if (tokens.length > 1) matched = tokens.every(t => text.toLowerCase().includes(t));
+                        }
+                    }
+                    if (matched) {
+                        const entry = { index: i, role: m.is_user ? 'user' : 'assistant', name: m.name || (m.is_user ? (ctx.name1 || 'User') : (ctx.name2 || 'Character')) };
+                        if (includeContent) entry.content = text.length > 500 ? text.slice(0, 500) + '...[truncated]' : text;
+                        results.push(entry);
+                        if (results.length >= maxResults) break;
+                    }
+                }
+                return { found: results.length, results, note: `Use 'index' values in chat-changes proposals. Total messages searched: ${Math.min(msgs.length - 1, toIdx) - Math.max(0, fromIdx) + 1}` };
+            }
+            case 'search_lorebook': {
+                const activeBooks = getActiveLorebookNames();
+                const query = (toolInput.query || '').toLowerCase();
+                const targetBook = toolInput.book_name;
+                const searchIn = toolInput.search_in || 'all';
+                const results = [];
+                for (const bookName of activeBooks) {
+                    if (targetBook && !bookName.toLowerCase().includes(targetBook.toLowerCase())) continue;
+                    const data = await fetchWorldInfoBook(bookName).catch(() => null);
+                    if (!data) continue;
+                    for (const entry of wiEntriesToArray(data)) {
+                        let matched = false;
+                        const name = (entry.comment || '').toLowerCase();
+                        const keys = (entry.key || []).join(' ').toLowerCase();
+                        const text = (entry.content || '').toLowerCase();
+                        if (searchIn === 'all') matched = name.includes(query) || keys.includes(query) || text.includes(query);
+                        else if (searchIn === 'name') matched = name.includes(query);
+                        else if (searchIn === 'keys') matched = keys.includes(query);
+                        else if (searchIn === 'content') matched = text.includes(query);
+                        if (matched) results.push({
+                            book: getDisplayName(bookName),
+                            uid: entry.uid,
+                            name: entry.comment || `Entry #${entry.uid}`,
+                            keys: entry.key || [],
+                            content_preview: (entry.content || '').slice(0, 200) + ((entry.content || '').length > 200 ? '...' : ''),
+                            constant: !!entry.constant,
+                            disabled: !!entry.disable,
+                        });
+                        if (results.length >= 20) break;
+                    }
+                    if (results.length >= 20) break;
+                }
+                return { found: results.length, results };
+            }
+            case 'ask_user': {
+                return { __ask_user: true, question: toolInput.question, context: toolInput.context };
+            }
+            case 'get_char_info': {
+                const charInfoFull = getCharInfo();
+                if (!charInfoFull) return { error: 'No active character.' };
+                const charCtx = ctx.characters?.[ctx.characterId];
+                const requestedFields = toolInput.fields || ['description', 'personality', 'scenario'];
+                const result = { name: charInfoFull.name };
+                for (const f of requestedFields) {
+                    if (f === 'tags') result.tags = getTagsForCharacter(charCtx);
+                    else if (f === 'alternate_greetings') result.alternate_greetings = (charCtx?.data?.alternate_greetings || []);
+                    else result[f] = (charInfoFull[f] || charCtx?.data?.[f] || '');
+                }
+                return result;
+            }
+            case 'get_chat_stats': {
+                const msgs = ctx.chat || [];
+                const userMsgs = msgs.filter(m => m.is_user);
+                const asMsgs = msgs.filter(m => !m.is_user);
+                const totalChars = msgs.reduce((s, m) => s + (m.mes || '').length, 0);
+                return {
+                    total_messages: msgs.length,
+                    user_messages: userMsgs.length,
+                    assistant_messages: asMsgs.length,
+                    approx_tokens: Math.ceil(totalChars / 3.5),
+                    first_message_index: 0,
+                    last_message_index: msgs.length - 1,
+                    char_name: ctx.name2 || 'Character',
+                    user_name: ctx.name1 || 'User',
+                };
+            }
+            case 'get_recent_messages': {
+                const msgs = ctx.chat || [];
+                const count = Math.min(toolInput.count ?? 10, 50);
+                const fromEnd = toolInput.from_end !== false;
+                const role = toolInput.role || 'all';
+                let filtered = msgs.map((m, i) => ({ ...m, _idx: i }));
+                if (role === 'user') filtered = filtered.filter(m => m.is_user);
+                if (role === 'assistant') filtered = filtered.filter(m => !m.is_user);
+                if (fromEnd) filtered = filtered.slice(-count);
+                else filtered = filtered.slice(0, count);
+                return {
+                    messages: filtered.map(m => ({
+                        index: m._idx,
+                        role: m.is_user ? 'user' : 'assistant',
+                        name: m.name || (m.is_user ? (ctx.name1 || 'User') : (ctx.name2 || 'Character')),
+                        content: (m.mes || '').length > 600 ? m.mes.slice(0, 600) + '...[truncated]' : (m.mes || ''),
+                    })),
+                    note: 'Use "index" values in chat-changes proposals for precise targeting.',
+                };
+            }
+            default: return { error: `Unknown tool: ${toolName}` };
+        }
+    }
+
+    function createToolCallEl(tc) {
+        const item = document.createElement('div');
+        item.className = 'scp-tool-call-item scp-inline-tool-call';
+        item.dataset.toolId = tc.id;
+        const def = TOOL_DEFINITIONS.find(d => d.name === tc.name);
+        const iconClass = def?.icon || 'fa-screwdriver-wrench';
+        
+        const isWarning = tc.status === 'warning';
+        const statusClass = tc.status === 'running' ? 'running' : tc.status === 'error' ? 'error' : isWarning ? 'warning' : 'done';
+        const statusLabel = tc.status === 'running' ? 'Running' : tc.status === 'error' ? 'Error' : isWarning ? 'Unavailable' : 'Done';
+        const colorStyle = isWarning ? 'color: var(--scp-warning, #ffb432);' : '';
+
+        const spinnerHtml = tc.status === 'running' ? '<span class="scp-tool-spin">⟳</span> ' : '';
+        const iconHtml = tc.status === 'running'
+            ? '<span class="scp-tool-spin" style="font-size:11px">⟳</span>'
+            : `<i class="fa-solid ${iconClass}" style="font-size:11px"></i>`;
+
+        item.innerHTML = `<div class="scp-tool-call-header">
+  <div class="scp-tool-call-icon ${statusClass}" ${isWarning ? `style="${colorStyle}"` : ''}>${iconHtml}</div>
+  <div class="scp-tool-call-name">${escHtml(def?.label || tc.name)}</div>
+  <div class="scp-tool-call-status ${statusClass}" ${isWarning ? `style="${colorStyle}"` : ''}>${spinnerHtml}${escHtml(statusLabel)}</div>
+  <div class="scp-tool-call-chevron">▶</div>
+</div>
+<div class="scp-tool-call-body">
+  <div class="scp-tool-call-section-label">Input</div>
+  <pre class="scp-tool-call-args">${escHtml(JSON.stringify(tc.input, null, 2))}</pre>
+  ${tc.result !== undefined ? `<div class="scp-tool-call-section-label" style="margin-top:8px">Result</div><pre class="scp-tool-call-result${tc.status === 'error' ? ' error-result' : ''}" ${isWarning ? `style="${colorStyle}"` : ''}>${escHtml(typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result, null, 2))}</pre>` : ''}
+</div>`;
+        item.querySelector('.scp-tool-call-header').addEventListener('click', () => {
+            const isOpen = !item.classList.contains('open');
+            _dbgAdd('TOOL_CALL_HEADER_TOGGLE', { toolId: tc.id, open: isOpen });
+
+            item.classList.toggle('open');
+        });
+        return item;
+    }
+
+    function postProcessToolCalls(containerEl, toolCalls) {
+        if (!toolCalls || !toolCalls.length) return;
+        containerEl.querySelectorAll('.scp-tool-call-ph').forEach((ph) => {
+            const idx = parseInt(ph.dataset.tcid, 10);
+            const tc = toolCalls[idx];
+            if (tc) ph.replaceWith(createToolCallEl(tc));
+        });
+
+        const allTCs = [...containerEl.querySelectorAll('.scp-inline-tool-call')];
+        allTCs.forEach(tc => tc.classList.remove('scp-tc-chain-start','scp-tc-chain-mid','scp-tc-chain-end'));
+        
+        let i = 0;
+        while (i < allTCs.length) {
+            let end = i;
+            while (end + 1 < allTCs.length) {
+                let sib = allTCs[end].nextSibling;
+                while (sib && ((sib.nodeType === Node.TEXT_NODE && !sib.textContent.trim()) || sib.tagName === 'BR')) {
+                    sib = sib.nextSibling;
+                }
+                if (sib === allTCs[end + 1]) end++; else break;
+            }
+            if (end > i) {
+                for (let j = i; j <= end; j++) {
+                    if (j === i) allTCs[j].classList.add('scp-tc-chain-start');
+                    else if (j === end) allTCs[j].classList.add('scp-tc-chain-end');
+                    else allTCs[j].classList.add('scp-tc-chain-mid');
+                }
+            } else {
+                allTCs[i].classList.add('scp-tc-chain-start', 'scp-tc-chain-end');
+            }
+            i = end + 1;
+        }
+    }
+
+    function setupToolsSettingsUI() {
+        const s = getSettings();
+        const listEl = document.getElementById('scp-sp-tools-list');
+        if (!listEl) return;
+        
+        let promptWrap = document.getElementById('scp-sp-tools-prompt-wrap');
+        
+        const ta = document.getElementById('scp-sp-tools-prompt');
+        if (ta) {
+            ta.value = s.toolsSystemPrompt || DEFAULT_TOOLS_PROMPT;
+            ta.addEventListener('input', () => { getSettings().toolsSystemPrompt = ta.value; saveSettings(); });
+        }
+        document.getElementById('scp-sp-tools-reset')?.addEventListener('click', () => {
+            getSettings().toolsSystemPrompt = DEFAULT_TOOLS_PROMPT; saveSettings();
+            if (ta) ta.value = DEFAULT_TOOLS_PROMPT;
+        });
+
+        const setC = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+        const setV = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
+        setC('scp-sp-tools-enabled', s.toolsEnabled);
+        setV('scp-sp-tools-max-rounds', s.toolsMaxRounds ?? 5);
+
+        document.getElementById('scp-sp-tools-enabled')?.addEventListener('change', e => {
+            getSettings().toolsEnabled = e.target.checked; saveSettings();
+            const stEl = document.getElementById('scp-tools-enabled'); if (stEl) stEl.checked = e.target.checked;
+        });
+        document.getElementById('scp-sp-tools-max-rounds')?.addEventListener('input', e => {
+            getSettings().toolsMaxRounds = parseInt(e.target.value) || 5; saveSettings();
+        });
+
+        const streamingOff = s.forceStreaming === 'off';
+
+        listEl.innerHTML = '';
+        for (const tool of TOOL_DEFINITIONS) {
+            const row = document.createElement('div');
+            row.className = 'scp-tool-toggle-row';
+            const isEnabled = s[tool.settingKey] !== false;
+            const isAskUser = tool.id === 'ask_user';
+            const isDisabledByStream = isAskUser && streamingOff;
+            const iconHtml = `<i class="fa-solid ${tool.icon}" style="width:13px;text-align:center;margin-right:4px;opacity:.7"></i>`;
+            row.innerHTML = `<label class="scp-sp-check" style="flex:1${isDisabledByStream ? ';opacity:.45;pointer-events:none' : ''}"><input type="checkbox" id="scp-sp-tool-${tool.id}" ${isEnabled && !isDisabledByStream ? 'checked' : ''} ${isDisabledByStream ? 'disabled' : ''}><span class="scp-tool-toggle-name">${iconHtml}${escHtml(tool.label)}</span></label>`;
+            const descEl = document.createElement('div');
+            descEl.className = 'scp-tool-toggle-desc';
+            descEl.style.cssText = 'font-size:10px;color:var(--scp-text-muted);margin-top:2px;padding-left:20px';
+            descEl.textContent = isDisabledByStream ? '⚠ Unavailable — requires streaming to be enabled (not "Force Off")' : tool.description;
+            if (isDisabledByStream) descEl.style.color = 'var(--scp-danger)';
+            row.appendChild(descEl);
+            if (!isDisabledByStream) {
+                row.querySelector(`#scp-sp-tool-${tool.id}`)?.addEventListener('change', e => {
+                    getSettings()[tool.settingKey] = e.target.checked; saveSettings();
+                });
+            }
+            listEl.appendChild(row);
+        }
+
+        document.getElementById('scp-open-tools-settings')?.addEventListener('click', () => {
+            openSettingsPanel();
+            setTimeout(() => {
+                const tab = document.querySelector('[data-sptab="tools"]');
+                if (tab) tab.click();
+            }, 80);
+        });
+    }
+
+    // ─── Agentic Loop (Tool Calls) ────────────────────────────────────────────────
+
+    let _activeToolCalls = [];
+    let _askUserResolve = null;
+
+    function _unusedAgenticStub() {}
+
+   function parseToolCallsFromText(text) {
+        const results = [];
+        const re = /```tool_call\n?([\s\S]*?)(?:```|$)/gi;
+        let m;
+        while ((m = re.exec(text)) !== null) {
+            const rawBlock = m[1].trim();
+            if (!rawBlock) continue;
+
+            let extracted = [];
+
+            try {
+                const parsed = JSON.parse(rawBlock);
+                if (Array.isArray(parsed)) {
+                    extracted = parsed.filter(p => p && p.name).map(p => ({ name: p.name, input: p.input || {} }));
+                } else if (parsed && parsed.name) {
+                    extracted.push({ name: parsed.name, input: parsed.input || {} });
+                }
+            } catch (_) {}
+
+            if (!extracted.length) {
+                try {
+                    const fixedRaw = '[' + rawBlock.replace(/}\s*{/g, '},{') + ']';
+                    const parsed = JSON.parse(fixedRaw);
+                    if (Array.isArray(parsed)) {
+                        extracted = parsed.filter(p => p && p.name).map(p => ({ name: p.name, input: p.input || {} }));
+                    }
+                } catch (_) {}
+            }
+
+            if (!extracted.length) {
+                const lines = rawBlock.split('\n');
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const parsed = JSON.parse(line.trim());
+                        if (parsed && parsed.name) {
+                            extracted.push({ name: parsed.name, input: parsed.input || {} });
+                        }
+                    } catch (_) {}
+                }
+            }
+
+            if (!extracted.length) {
+                const nameMatch = rawBlock.match(/"name"\s*:\s*"([^"]+)"/);
+                if (nameMatch) {
+                    extracted.push({ name: nameMatch[1], input: {} });
+                } else {
+                    extracted.push({ name: 'parsing...', input: {} });
+                }
+            }
+
+            results.push(...extracted);
+        }
+        return results;
+    }
+
+    function stripToolCallsFromText(text) {
+        return text.replace(/```tool_call[\s\S]*?```/gi, '').trim();
+    }
+
+    function buildToolCallsSystemBlock() {
+        const tools = getEnabledTools();
+        if (!tools.length) return '';
+        const s = getSettings();
+        
+        const formatSchemaProps = (properties) => {
+            if (!properties || Object.keys(properties).length === 0) return '{}';
+            const lines = [];
+            for (const [key, prop] of Object.entries(properties)) {
+                lines.push(`"${key}": ${JSON.stringify(prop)}`);
+            }
+            return `{${lines.join(',\n    ')}}`;
+        };
+
+        const toolsList = tools.map(t =>
+            `- **${t.name}**: ${t.description} | Params: ${formatSchemaProps(t.schema.properties)}`
+        ).join("\n");
+        
+        let prompt = s.toolsSystemPrompt || DEFAULT_TOOLS_PROMPT;
+        if (!prompt.includes('{{tools_list}}')) {
+            prompt += '\n\nTools available:\n{{tools_list}}';
+        }
+        if (!prompt.includes('{{tool_call_format}}')) {
+            prompt = prompt.replace('Format requirement:', 'Format requirement:\n{{tool_call_format}}');
+        }
+        return '\n\n' + prompt
+            .replace('{{tools_list}}', toolsList)
+            .replace('{{tool_call_format}}', TOOL_CALL_FORMAT_BLOCK);
+    }
+
+    async function executeAskUser(input, msgEl) {
+        const question = input.question || 'Do you have any additional information?';
+        const context = input.context || '';
+        return new Promise(resolve => {
+            _askUserResolve = resolve;
+            const wrap = document.createElement('div');
+            wrap.className = 'scp-tool-ask-wrap';
+            if (context) {
+                const ctx = document.createElement('div');
+                ctx.style.cssText = 'font-size:10px;color:var(--scp-text-muted);margin-bottom:6px;font-style:italic';
+                ctx.textContent = context;
+                wrap.appendChild(ctx);
+            }
+            const q = document.createElement('div');
+            q.className = 'scp-tool-ask-question';
+            q.textContent = question;
+            wrap.appendChild(q);
+            const inp = document.createElement('textarea');
+            inp.className = 'scp-tool-ask-input';
+            inp.placeholder = 'Your answer…';
+            inp.rows = 2;
+            wrap.appendChild(inp);
+            const btn = document.createElement('button');
+            btn.className = 'scp-tool-ask-submit';
+            btn.textContent = 'Submit Answer';
+            btn.addEventListener('click', () => {
+                const answer = inp.value.trim();
+                if (!answer) return;
+
+                _dbgAdd('ASK_USER_SUBMIT', { question, answer });
+
+                wrap.remove();
+                resolve(answer);
+                _askUserResolve = null;
+            });
+            inp.addEventListener('keydown', e => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); btn.click(); }
+            });
+            wrap.appendChild(btn);
+            const body = msgEl?.querySelector('.scp-msg-body');
+            if (body) body.appendChild(wrap);
+            inp.focus();
+        });
+    }
+
     // ─── Lorebook Manager UI ─────────────────────────────────────────────────────
 
     let _lbActiveBook = null;
@@ -4232,11 +5491,14 @@ replacement text
     
     function renderProposalCard(changes, msgEl) {
         if (!changes?.length) return;
+
+        _dbgAdd('LB_PROPOSAL_CARD_RENDER', { msgId: msgEl.dataset.id, changesCount: changes.length });
+
         document.querySelector(`.scp-lb-proposal-card[data-for="${msgEl.dataset.id}"]`)?.remove();
 
         const editableChanges = changes.map(c => ({ ...c }));
         const itemStates = editableChanges.map(() => 'pending');
-        const actionLabels = { add: '+ Add', edit: '✎ Edit', patch: '✂ Patch', delete: '✕ Remove' };
+        const actionLabels = { add: '+ Add', edit: '✎ Edit', patch: '✂ Patch', prepend: '⬆ Prepend', append: '⬇ Append', delete: '✕ Remove' };
 
         const card = document.createElement('div');
         card.className = 'scp-lb-proposal-card';
@@ -4286,6 +5548,9 @@ replacement text
         dismissBtn.innerHTML = I.x; dismissBtn.title = 'Dismiss';
         dismissBtn.addEventListener('click', () => {
             const dismissedChanges = editableChanges.filter((_, i) => itemStates[i] === 'pending');
+
+            _dbgAdd('LB_PROPOSAL_ACTION', { action: 'dismissed', msgId: card.dataset.for, dismissedCount: dismissedChanges.length });
+
             if (dismissedChanges.length > 0) {
                 logLBHistoryChanges(dismissedChanges, 'Dismissed', card.dataset.for);
             }
@@ -4312,6 +5577,11 @@ replacement text
             itemMeta.innerHTML = `
                 <span class="scp-lb-proposal-action">${escHtml(actionLabels[c.action] || c.action || '?')}</span>
                 <span class="scp-lb-proposal-name scp-lb-pn-target">${escHtml(c.name || c.originalName || `Entry #${c.uid || '?'}`)}</span>${c.constant ? '<span class="scp-lb-src-badge scp-lb-src-global" style="font-size:9px;padding:1px 5px" title="Constant entry">★</span>' : ''}`;
+
+            const warnEl = document.createElement('div');
+            warnEl.style.cssText = 'font-size:10px;color:var(--scp-danger);margin-top:4px;width:100%;display:none;cursor:pointer;';
+            warnEl.title = 'Click to open the edit panel and fix manually';
+            itemMeta.appendChild(warnEl);
 
             const _activeBooks = getActiveLorebookNames();
             const _currentBook = editableChanges[ci].worldName || '';
@@ -4459,12 +5729,42 @@ replacement text
                         : `in ${getDisplayName(bookName)} ⚠`;
                 }
 
+                let isValid = found;
+                let reason = found ? '' : 'Entry not found in selected lorebook';
+
+                if (found && editableChanges[ci].action === 'patch') {
+                    const orig = resolved.origEntry;
+                    let current = orig?.content || '';
+                    for (const patch of (editableChanges[ci].patches || [])) {
+                        const { result, matched } = applySearchReplaceToField(current, patch.search || patch.anchor || '', patch.replace || '');
+                        if (!matched) {
+                            isValid = false;
+                            reason = `ANCHOR not found: "${(patch.search || patch.anchor || '').slice(0, 40)}..."`;
+                            break;
+                        }
+                        current = result;
+                    }
+                }
+
+                if (!isValid) {
+                    applyItemBtn.disabled = true;
+                    applyItemBtn.title = reason;
+                    item.style.borderLeftColor = 'var(--scp-danger)';
+                    warnEl.textContent = `⚠ ${reason}`;
+                    warnEl.style.display = 'block';
+                } else {
+                    applyItemBtn.disabled = false;
+                    applyItemBtn.title = 'Apply this change';
+                    item.style.borderLeftColor = '';
+                    warnEl.style.display = 'none';
+                }
+
                 worldTrigger.classList.toggle('warn', !found);
-                applyItemBtn.disabled = !found;
-                applyItemBtn.title = found ? 'Apply this change' : 'Entry not found in selected lorebook';
             };
 
             const selectBook = async (name) => {
+                _dbgAdd('LB_PROPOSAL_WORLD_CHANGED', { from: _selectedBook, to: name });
+
                 _selectedBook = name;
                 editableChanges[ci].worldName = name;
                 worldTriggerText.textContent = `in ${getDisplayName(name)}`;
@@ -4474,7 +5774,7 @@ replacement text
                     el.classList.toggle('active', el.dataset.value === name);
                 });
                 closeWorldPanel();
-                if (c.action === 'edit' || c.action === 'delete' || c.action === 'patch') await _validateBookEntry(name);
+                if (c.action !== 'add') await _validateBookEntry(name);
             };
 
             worldTrigger.addEventListener('click', e => {
@@ -4508,7 +5808,7 @@ replacement text
             }
 
             // Diff btn - for edit AND patch actions
-            if (c.action === 'edit' || c.action === 'patch') {
+            if (['edit', 'patch', 'prepend', 'append'].includes(c.action)) {
                 const diffBtn = document.createElement('button');
                 diffBtn.className = 'scp-lb-proposal-diff-btn';
                 diffBtn.title = 'View diff'; diffBtn.innerHTML = I.diff;
@@ -4544,6 +5844,9 @@ replacement text
                 if (itemStates[ci] !== 'pending') return;
                 closeEditPanel();
                 applyItemBtn.disabled = true; applyItemBtn.textContent = '…';
+
+                _dbgAdd('LB_PROPOSAL_ACTION', { action: 'applied', msgId: card.dataset.for, change: editableChanges[ci] });
+
                 try {
                     await applyLBChanges([editableChanges[ci]], card.dataset.for);
                     itemStates[ci] = 'applied';
@@ -4567,6 +5870,9 @@ replacement text
                 if (itemStates[ci] !== 'pending') return;
                 closeEditPanel();
                 itemStates[ci] = 'rejected';
+
+                _dbgAdd('LB_PROPOSAL_ACTION', { action: 'rejected', msgId: card.dataset.for, change: editableChanges[ci] });
+
                 item.classList.add('scp-lb-item-rejected');
                 itemBtns.querySelectorAll('button').forEach(b => { b.disabled = true; });
 
@@ -4718,13 +6024,17 @@ replacement text
                 item.appendChild(editPanel);
 
                 if (editToggleBtn) {
-                    editToggleBtn.addEventListener('click', e => {
+                    const toggleEditPanel = (e) => {
                         e.stopPropagation();
                         const isOpen = editPanel.style.display !== 'none';
                         editPanel.style.display = isOpen ? 'none' : 'flex';
                         if (previewEl) previewEl.style.display = isOpen ? '' : 'none';
                         if (triggersEl) triggersEl.style.display = isOpen ? '' : 'none';
                         editToggleBtn.classList.toggle('active', !isOpen);
+                    };
+                    editToggleBtn.addEventListener('click', toggleEditPanel);
+                    warnEl.addEventListener('click', (e) => {
+                        if (editPanel.style.display === 'none') toggleEditPanel(e);
                     });
                 }
             }
@@ -4732,7 +6042,7 @@ replacement text
             list.appendChild(item);
             itemEls.push(item);
 
-            if ((c.action === 'edit' || c.action === 'delete' || c.action === 'patch') && itemStates[ci] === 'pending') {
+            if (c.action !== 'add' && itemStates[ci] === 'pending') {
                 _validateBookEntry(_selectedBook).catch(() => {});
             }
         });
@@ -4809,6 +6119,7 @@ replacement text
     async function openLorebookManager() {
         const overlay = document.getElementById('scp-lb-overlay');
         if (!overlay) return;
+        _dbgAdd('LB_UI_OPEN');
         applyCustomTheme(getSettings().customTheme || THEME_PRESETS.default);
         overlay.style.display = 'flex';
         const s = getSettings();
@@ -4821,6 +6132,7 @@ replacement text
 
     function closeLorebookManager() {
         document.getElementById('scp-lb-overlay').style.display = 'none';
+        _dbgAdd('LB_UI_CLOSE');
     }
 
     function _applyLBBookCheckState(item, name, s) {
@@ -4834,7 +6146,6 @@ replacement text
         check.title = isSelected ? 'Selected: all entries included — click to exclude' : isExcluded ? 'Excluded: all entries blocked — click to reset' : 'Default — click to include all';
         item.classList.toggle('selected', isSelected);
         item.classList.toggle('lb-excluded', isExcluded);
-        // dim entries area when forced state
         const isForced = isSelected || isExcluded;
         if (item.classList.contains('lb-book-open')) {
             const entriesEl = document.getElementById('scp-lb-entries');
@@ -4914,6 +6225,7 @@ replacement text
         } else {
             s.lorebookExcludedBooks = s.lorebookExcludedBooks.filter(b => b !== name);
         }
+        _dbgAdd('LB_BOOK_TOGGLE_STATE', { bookName: name, isSelected: s.lorebookSelectedBooks.includes(name), isExcluded: (s.lorebookExcludedBooks || []).includes(name) });
         saveSettings();
 
         await buildLorebookContextBlock(s);
@@ -5016,6 +6328,9 @@ replacement text
         else if (current === true) next = false;
         else { delete s.lorebookEntryOverrides[key]; next = undefined; }
         if (next !== undefined) s.lorebookEntryOverrides[key] = next;
+
+        _dbgAdd('LB_ENTRY_CYCLE_OVERRIDE', { bookName, uid: entry.uid, nextState: next });
+
         saveSettings();
 
         const ind = rowEl.querySelector('.scp-lb-entry-indicator');
@@ -5105,6 +6420,9 @@ replacement text
         entry.content = document.getElementById('scp-lb-detail-content')?.value || '';
         Object.assign(_lbEntryDetailEntry, entry);
         await saveWorldInfoBook(_lbEntryDetailBook, data);
+
+        _dbgAdd('LB_ENTRY_SAVE_MANUAL', { bookName: _lbEntryDetailBook, uid: _lbEntryDetailEntry.uid, nameLength: entry.comment.length, contentLength: entry.content.length });
+
         toastr.success('Entry saved', EXT_DISPLAY);
         document.getElementById('scp-lb-detail-title').textContent = entry.comment || `Entry #${entry.uid}`;
         renderEntryList(_lbEntryDetailBook, _lbSearchQuery);
@@ -5119,6 +6437,9 @@ replacement text
         if (!data) return;
         delete data.entries[_lbEntryDetailEntry.uid];
         await saveWorldInfoBook(_lbEntryDetailBook, data);
+
+        _dbgAdd('LB_ENTRY_DELETE', { bookName: _lbEntryDetailBook, uid: _lbEntryDetailEntry.uid });
+
         toastr.success('Entry deleted', EXT_DISPLAY);
         document.getElementById('scp-lb-entry-detail').style.display = 'none';
         document.getElementById('scp-lb-entries').style.display = '';
@@ -5145,6 +6466,9 @@ replacement text
             case_sensitive: null, automation_id: '', role: null,
             vectorized: false, sticky: null, cooldown: null, delay: null,
         };
+
+        _dbgAdd('LB_ENTRY_ADD_NEW', { bookName: _lbActiveBook, newUid });
+
         data.entries[newUid] = newEntry;
         await saveWorldInfoBook(_lbActiveBook, data);
         toastr.success('Entry created', EXT_DISPLAY);
@@ -5288,12 +6612,17 @@ replacement text
             localHistoryLimit: 50,
             connectionSource: 'default',
             connectionProfileId: '',
+            customUrl: 'http://localhost:5000/v1',
+            customKey: '',
+            customModel: '',
             maxTokens: 8048,
             includeSystemPrompt: false,
             includeAuthorsNote: true,
             includeCharacterCard: true,
             includeUserPersonality: true,
+            includeAlternateSwipes: false,
             systemPrompt: DEFAULT_SYSTEM_PROMPT,
+            memoryManagePrompt: DEFAULT_MEMORY_PROMPT,
             profiles: {},
             activeProfile: '',
             profileBindings: {},
@@ -5358,6 +6687,25 @@ replacement text
             pickerPreviewLastLines: 0,
             imageAnalysisMode: 'direct',
             attachedFiles: [],
+            memoryEnabled: true,
+            memoryInject: true,
+            memoryScope: 'global',
+            memoryTag: 'memory-update',
+            memoryNotify: true,
+            memories: {},
+            toolsEnabled: true,
+            toolsThinking: false,
+            toolsMaxRounds: 5,
+            toolsEnabled_search_chat: true,
+            toolsEnabled_search_lorebook: true,
+            toolsEnabled_ask_user: true,
+            toolsEnabled_get_char_info: true,
+            toolsEnabled_get_chat_stats: true,
+            toolsEnabled_get_recent_messages: true,
+            includeSummaryception: true,
+            useAspectEvolutia: true,
+            autoExpandMacros: false,
+            includeHiddenMessages: false,
         };
         for (const [k, v] of Object.entries(defaults)) {
             if (s[k] === undefined) s[k] = v;
@@ -5401,19 +6749,18 @@ replacement text
     }
 
 
-
     // Metric index map
     const _SM = { msg:0, regen:1, sess:2, tokIn:3, tokOut:4, qp:5, lb:6, edit:7 };
     const _STAT_N = 8;
     const _STAT_META = [
-        { key:'msg',   label:'Messages',    icon:'💬', color:'#7c6dfa' },
-        { key:'regen', label:'Regens',      icon:'🔄', color:'#4caf7d' },
-        { key:'sess',  label:'Sessions',    icon:'📂', color:'#ffb432' },
-        { key:'tokIn', label:'Tokens In',   icon:'📥', color:'#5bc0eb' },
-        { key:'tokOut',label:'Tokens Out',  icon:'📤', color:'#f06292' },
-        { key:'qp',    label:'QPrompts',    icon:'⚡', color:'#ff8a65' },
-        { key:'lb',    label:'LB Changes',  icon:'📖', color:'#ab47bc' },
-        { key:'edit',  label:'Edits',       icon:'✏️', color:'#78909c' },
+        { key:'msg',   label:'Messages',    color:'#7c6dfa', icon:'fa-message' },
+        { key:'regen', label:'Regens',      color:'#4caf7d', icon:'fa-rotate-right' },
+        { key:'sess',  label:'Sessions',    color:'#ffb432', icon:'fa-list' },
+        { key:'tokIn', label:'Tokens In',   color:'#5bc0eb', icon:'fa-arrow-right-to-bracket' },
+        { key:'tokOut',label:'Tokens Out',  color:'#f06292', icon:'fa-arrow-right-from-bracket' },
+        { key:'qp',    label:'QPrompts',    color:'#ff8a65', icon:'fa-bolt' },
+        { key:'lb',    label:'LB Changes',  color:'#ab47bc', icon:'fa-book-open' },
+        { key:'edit',  label:'Edits',       color:'#78909c', icon:'fa-pen-to-square' },
     ];
 
     function _ensureStats() {
@@ -5623,7 +6970,7 @@ replacement text
             const card = document.createElement('div');
             card.className = `scp-stats-card${_statsState.metric === idx ? ' active' : ''}`;
             card.style.setProperty('--scp-stat-color', meta.color);
-            card.innerHTML = `<span class="scp-stats-card-icon">${meta.icon}</span><span class="scp-stats-card-val">${_fmtNum(totals[idx])}</span><span class="scp-stats-card-label">${meta.label}</span>`;
+            card.innerHTML = `<div style="display:flex; justify-content:space-between; width:100%; align-items:center;"><span class="scp-stats-card-val">${_fmtNum(totals[idx])}</span><i class="fa-solid ${meta.icon}" style="color:${meta.color}; opacity:0.4; font-size:16px;"></i></div><span class="scp-stats-card-label">${meta.label}</span>`;
             card.addEventListener('click', () => {
                 _statsState.metric = idx;
                 container.querySelectorAll('.scp-stats-card').forEach((c, i) => c.classList.toggle('active', i === idx));
@@ -5663,185 +7010,174 @@ replacement text
             return `<text x="${px(i).toFixed(1)}" y="${H-3}" text-anchor="middle" class="scp-stats-axis-label">${escHtml(b.label)}</text>`;
         }).join('');
 
-        const dotsHTML = points.map((p, i) => vals[i] > 0
-            ? `<circle class="scp-stats-dot" cx="${p[0].toFixed(2)}" cy="${p[1].toFixed(2)}" r="3" fill="${meta.color}" data-i="${i}"/>`
-            : '').join('');
-
-        const hoverCols = buckets.map((b, i) => {
-            const colW = cW / Math.max(buckets.length, 1);
-            const x = px(i) - colW / 2;
-            return `<rect class="scp-stats-hcol" x="${x.toFixed(1)}" y="${PT}" width="${colW.toFixed(1)}" height="${cH}" fill="transparent" data-i="${i}" data-v="${vals[i]}" data-l="${escHtml(b.label)}"/>`;
-        }).join('');
-
         const existing = container.querySelector('.scp-stats-chart-inner');
-        const prevLine = existing?.querySelector('.scp-stats-line-path');
-        const prevArea = existing?.querySelector('.scp-stats-area-path');
+        let prevLine = existing?.querySelector('.scp-stats-line-path');
+        let prevArea = existing?.querySelector('.scp-stats-area-path');
 
-        const linePath = buildLinePath(points);
-        const areaPath = buildAreaPath(points);
-
-        if (prevLine && prevArea) {
-            const svgEl2 = existing.querySelector('.scp-stats-svg');
-            const defs = svgEl2?.querySelector('defs');
-            if (defs) {
-                defs.innerHTML = `<linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stop-color="${meta.color}" stop-opacity="0.22"/>
-                    <stop offset="100%" stop-color="${meta.color}" stop-opacity="0.01"/>
-                </linearGradient>`;
-                prevArea.setAttribute('fill', `url(#${gradId})`);
-            }
-            prevLine.style.stroke = meta.color;
-
-            const parsePoints = (pathStr) => {
-                const matches = pathStr.match(/[ML]([\d.]+),([\d.]+)/g) || [];
-                return matches.map(m => { const [x, y] = m.slice(1).split(',').map(Number); return [x, y]; });
-            };
-            const oldPts = parsePoints(prevLine.getAttribute('d') || '');
-            const newPts = points;
-
-            const oldDotEls = existing.querySelectorAll('.scp-stats-dot');
-            oldDotEls.forEach(d => d.remove());
-
-            const dotGroup = existing.querySelector('.scp-stats-xlabels');
-            points.forEach((p, i) => {
-                if (vals[i] <= 0) return;
-                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                circle.setAttribute('class', 'scp-stats-dot');
-                circle.setAttribute('cx', p[0].toFixed(2));
-                
-                const startY = oldPts[i] ? oldPts[i][1] : (PT + cH);
-                circle.setAttribute('cy', startY.toString()); 
-                
-                circle.setAttribute('r', '3');
-                circle.setAttribute('fill', meta.color);
-                circle.setAttribute('data-i', i);
-                circle.style.opacity = oldPts[i] ? '1' : '0';
-                
-                if (dotGroup) svgEl2.insertBefore(circle, dotGroup);
-                else svgEl2.appendChild(circle);
-            });
-
-            const DURATION = 480;
-            const start = performance.now();
-            const lerp = (a, b, t) => a + (b - a) * t;
-            const ease = t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-            
-            const dotEls = Array.from(existing.querySelectorAll('.scp-stats-dot'));
-            const animFrame = (now) => {
-                const t = ease(Math.min(1, (now - start) / DURATION));
-                const interpolated = newPts.map((np, i) => {
-                    const op = oldPts[i] || [np[0], PT + cH];
-                    return [lerp(op[0], np[0], t), lerp(op[1], np[1], t)];
-                });
-                
-                prevLine.setAttribute('d', buildLinePath(interpolated));
-                prevArea.setAttribute('d', buildAreaPath(interpolated));
-                
-                dotEls.forEach((d) => {
-                    if (d) {
-                        const idx = parseInt(d.getAttribute('data-i') || '0');
-                        d.style.transition = 'none';
-                        d.setAttribute('cy', interpolated[idx][1].toFixed(2));
-                        d.style.opacity = '1';
-                    }
-                });
-                
-                if (t < 1) requestAnimationFrame(animFrame);
-            };
-            requestAnimationFrame(animFrame);
-
-            const labelsEl = existing.querySelector('.scp-stats-xlabels');
-            if (labelsEl) labelsEl.innerHTML = xLabels;
-            
-            const existingSvg = existing.querySelector('.scp-stats-svg');
-            if (existingSvg) {
-                existingSvg.querySelectorAll('line[x1]').forEach(l => l.remove());
-                existingSvg.querySelectorAll('text.scp-stats-axis-label').forEach(t => t.remove());
-                yTicks.forEach(({ y, lbl }) => {
-                    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                    line.setAttribute('x1', PL); line.setAttribute('y1', y.toFixed(1));
-                    line.setAttribute('x2', W - PR); line.setAttribute('y2', y.toFixed(1));
-                    line.setAttribute('stroke', 'rgba(255,255,255,0.06)'); line.setAttribute('stroke-width', '1');
-                    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                    text.setAttribute('x', PL - 4); text.setAttribute('y', (y + 4).toFixed(1));
-                    text.setAttribute('text-anchor', 'end'); text.setAttribute('class', 'scp-stats-axis-label');
-                    text.textContent = lbl;
-                    existingSvg.insertBefore(line, existingSvg.firstChild);
-                    existingSvg.insertBefore(text, existingSvg.firstChild);
-                });
-            }
-        } else {
+        if (!existing) {
             container.innerHTML = `
 <div class="scp-stats-chart-inner">
   <svg class="scp-stats-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
-    <defs>
-      <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${meta.color}" stop-opacity="0.22"/>
-        <stop offset="100%" stop-color="${meta.color}" stop-opacity="0.01"/>
-      </linearGradient>
-    </defs>
-    ${yTicks.map(t => `<line x1="${PL}" y1="${t.y.toFixed(1)}" x2="${W-PR}" y2="${t.y.toFixed(1)}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/><text x="${PL-4}" y="${(t.y+4).toFixed(1)}" text-anchor="end" class="scp-stats-axis-label">${t.lbl}</text>`).join('')}
-    <path class="scp-stats-area-path" d="${areaPath}" fill="url(#${gradId})"/>
-    <path class="scp-stats-line-path" d="${linePath}" fill="none" stroke="${meta.color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="transition:stroke 0.35s ease"/>
-    ${dotsHTML}
-    <g class="scp-stats-xlabels">${xLabels}</g>
-    ${hoverCols}
+    <defs></defs>
+    <path class="scp-stats-area-path" d="" fill="none"/>
+    <path class="scp-stats-line-path" d="" fill="none" stroke="${meta.color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <g class="scp-stats-xlabels"></g>
   </svg>
   <div class="scp-stats-tooltip" id="scp-stats-tt" style="display:none"></div>
 </div>`;
+            prevLine = container.querySelector('.scp-stats-line-path');
+            prevArea = container.querySelector('.scp-stats-area-path');
+        }
 
-            const svgPaths = container.querySelectorAll('.scp-stats-line-path, .scp-stats-area-path');
-            svgPaths.forEach(p => { p.style.opacity = '0'; p.style.transition = 'opacity 0.4s ease'; });
-            requestAnimationFrame(() => svgPaths.forEach(p => { p.style.opacity = '1'; }));
+        const svgEl2 = container.querySelector('.scp-stats-svg');
+        const defs = svgEl2?.querySelector('defs');
+        if (defs) {
+            defs.innerHTML = `<linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="${meta.color}" stop-opacity="0.22"/>
+                <stop offset="100%" stop-color="${meta.color}" stop-opacity="0.01"/>
+            </linearGradient>`;
+            prevArea.setAttribute('fill', `url(#${gradId})`);
+        }
+        prevLine.style.stroke = meta.color;
 
-            const dots = container.querySelectorAll('.scp-stats-dot');
-            dots.forEach((d) => {
-                const finalCy = parseFloat(d.getAttribute('cy'));
-                d.setAttribute('cy', (PT + cH).toString());
-                d.style.opacity = '0';
-                setTimeout(() => {
-                    d.style.transition = `cy 0.4s ease-out, opacity 0.3s ease-out`;
-                    d.setAttribute('cy', finalCy.toFixed(2));
-                    d.style.opacity = '1';
-                }, 20);
+        const parsePoints = (pathStr) => {
+            const matches = pathStr.match(/[ML]([\d.]+),([\d.]+)/g) || [];
+            return matches.map(m => { const [x, y] = m.slice(1).split(',').map(Number); return [x, y]; });
+        };
+        
+        let oldPts = parsePoints(prevLine.getAttribute('d') || '');
+        if (oldPts.length === 0) {
+            oldPts = points.map(p => [p[0], PT + cH]);
+        }
+        
+        const newPts = points;
+
+        const oldDotEls = container.querySelectorAll('.scp-stats-dot');
+        oldDotEls.forEach(d => d.remove());
+
+        const dotGroup = container.querySelector('.scp-stats-xlabels');
+        points.forEach((p, i) => {
+            if (vals[i] <= 0) return;
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('class', 'scp-stats-dot');
+            circle.setAttribute('cx', p[0].toFixed(2));
+            const startY = oldPts[i] ? oldPts[i][1] : (PT + cH);
+            circle.setAttribute('cy', startY.toString()); 
+            circle.setAttribute('r', '3');
+            circle.setAttribute('fill', meta.color);
+            circle.setAttribute('data-i', i);
+            circle.style.opacity = '0';
+            if (dotGroup) svgEl2.insertBefore(circle, dotGroup);
+            else svgEl2.appendChild(circle);
+        });
+
+        const DURATION = 480;
+        const start = performance.now();
+        const lerp = (a, b, t) => a + (b - a) * t;
+        const ease = t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+        
+        const dotEls = Array.from(container.querySelectorAll('.scp-stats-dot'));
+        const animFrame = (now) => {
+            const t = ease(Math.min(1, (now - start) / DURATION));
+            const interpolated = newPts.map((np, i) => {
+                const op = oldPts[i] || [np[0], PT + cH];
+                return [lerp(op[0], np[0], t), lerp(op[1], np[1], t)];
+            });
+            
+            prevLine.setAttribute('d', buildLinePath(interpolated));
+            prevArea.setAttribute('d', buildAreaPath(interpolated));
+            
+            dotEls.forEach((d) => {
+                const idx = parseInt(d.getAttribute('data-i') || '0');
+                d.setAttribute('cy', interpolated[idx][1].toFixed(2));
+                if (t > 0.8) d.style.opacity = (t - 0.8) * 5;
+            });
+            
+            if (t < 1) requestAnimationFrame(animFrame);
+            else dotEls.forEach(d => d.style.opacity = '1');
+        };
+        requestAnimationFrame(animFrame);
+
+        const labelsEl = container.querySelector('.scp-stats-xlabels');
+        if (labelsEl) labelsEl.innerHTML = xLabels;
+        
+        if (svgEl2) {
+            svgEl2.querySelectorAll('line[x1]').forEach(l => l.remove());
+            svgEl2.querySelectorAll('text.scp-stats-axis-label').forEach(t => t.remove());
+            yTicks.forEach(({ y, lbl }) => {
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', PL); line.setAttribute('y1', y.toFixed(1));
+                line.setAttribute('x2', W - PR); line.setAttribute('y2', y.toFixed(1));
+                line.setAttribute('stroke', 'rgba(255,255,255,0.06)'); line.setAttribute('stroke-width', '1');
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', PL - 4); text.setAttribute('y', (y + 4).toFixed(1));
+                text.setAttribute('text-anchor', 'end'); text.setAttribute('class', 'scp-stats-axis-label');
+                text.textContent = lbl;
+                svgEl2.insertBefore(line, svgEl2.firstChild);
+                svgEl2.insertBefore(text, svgEl2.firstChild);
             });
         }
 
-        const svgEl = container.querySelector('.scp-stats-svg');
-        const tt = container.querySelector('#scp-stats-tt') || container.querySelector('.scp-stats-tooltip');
-        if (!svgEl || !tt) return;
+        const tt = container.querySelector('#scp-stats-tt');
+        if (!svgEl2 || !tt) return;
 
-        const oldHoverCols = svgEl.querySelectorAll('.scp-stats-hcol');
-        oldHoverCols.forEach(r => r.remove());
-        const hoverFrag = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        hoverFrag.innerHTML = hoverCols;
-        svgEl.appendChild(hoverFrag);
+        let hlDot = svgEl2.querySelector('.scp-stats-hl-dot');
+        if (!hlDot) {
+            hlDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            hlDot.setAttribute('class', 'scp-stats-hl-dot');
+            hlDot.setAttribute('r', '5');
+            hlDot.setAttribute('stroke', 'var(--scp-bg)');
+            hlDot.setAttribute('stroke-width', '2');
+            hlDot.style.display = 'none';
+            hlDot.style.pointerEvents = 'none';
+            svgEl2.appendChild(hlDot);
+        }
 
         let _lastI = -1;
-        svgEl.addEventListener('pointermove', e => {
-            const r = svgEl.getBoundingClientRect();
-            const svgX = (e.clientX - r.left) / r.width * W;
-            const relX = svgX - PL;
-            const rawIdx = relX / cW * (buckets.length - 1);
-            const idx = Math.max(0, Math.min(buckets.length - 1, Math.round(rawIdx)));
-            if (idx === _lastI) return;
-            _lastI = idx;
-            const val = vals[idx];
-            tt.style.display = '';
-            tt.innerHTML = `<span class="scp-stats-tt-label">${escHtml(buckets[idx].label)}</span><span class="scp-stats-tt-val" style="color:${meta.color}">${_fmtNum(val)}</span>`;
-            const dotPxX = px(idx) / W * r.width;
-            const dotPxY = py(val) / H * r.height;
-            const ttW = 90;
-            let left = dotPxX - ttW / 2;
-            left = Math.max(0, Math.min(left, r.width - ttW));
-            tt.style.left = `${left}px`;
-            tt.style.top = `${Math.max(0, dotPxY - 42)}px`;
-            svgEl.querySelectorAll('.scp-stats-dot').forEach((d, i) => d.setAttribute('r', i === idx ? '4.5' : '3'));
+        let _rafTt = null;
+        
+        svgEl2.addEventListener('pointermove', e => {
+            if (_rafTt) return;
+            _rafTt = requestAnimationFrame(() => {
+                _rafTt = null;
+                const r = svgEl2.getBoundingClientRect();
+                const svgX = (e.clientX - r.left) / r.width * W;
+                
+                let closestIdx = 0;
+                let minDist = Infinity;
+                for (let i = 0; i < buckets.length; i++) {
+                    const dist = Math.abs(px(i) - svgX);
+                    if (dist < minDist) { minDist = dist; closestIdx = i; }
+                }
+                const idx = closestIdx;
+
+                if (idx === _lastI) return;
+                _lastI = idx;
+                
+                const val = vals[idx];
+                tt.style.display = '';
+                tt.innerHTML = `<span class="scp-stats-tt-label">${escHtml(buckets[idx].label)}</span><span class="scp-stats-tt-val" style="color:${meta.color}">${_fmtNum(val)}</span>`;
+                
+                const dotPxX = px(idx) / W * r.width;
+                const dotPxY = py(val) / H * r.height;
+                const ttW = 90;
+                let left = dotPxX - ttW / 2;
+                left = Math.max(0, Math.min(left, r.width - ttW));
+                
+                tt.style.left = `${left}px`;
+                tt.style.top = `${Math.max(0, dotPxY - 42)}px`;
+
+                hlDot.setAttribute('cx', px(idx).toFixed(2));
+                hlDot.setAttribute('cy', py(val).toFixed(2));
+                hlDot.setAttribute('fill', meta.color);
+                hlDot.style.display = '';
+            });
         });
-        svgEl.addEventListener('pointerleave', () => {
+        
+        svgEl2.addEventListener('pointerleave', () => {
             tt.style.display = 'none';
+            if (hlDot) hlDot.style.display = 'none';
             _lastI = -1;
-            svgEl.querySelectorAll('.scp-stats-dot').forEach(d => d.setAttribute('r', '3'));
         });
 
         if ('ontouchstart' in window || window.innerWidth <= 900) {
@@ -5857,15 +7193,16 @@ replacement text
     const SESSION_OVERRIDE_KEYS = [
         'contextDepth','localHistoryLimit','maxTokens',
         'connectionSource','connectionProfileId','systemPrompt',
+        'customUrl', 'customKey', 'customModel',
         'includeSystemPrompt','includeUserPersonality','reasoningTrimStrings',
         'applyRegexToContext','forceStreaming',
         'charEditAIEnabled', 'charEditPrompt', 'lorebookAIManageEnabled',
         'lorebookManagePrompt', 'chatEditAIEnabled', 'chatEditPrompt', 'altGreetingIndices',
-        'lorebookAutoKeyword'
+        'lorebookAutoKeyword', 'includeAlternateSwipes'
     ];
 
     function getSessionOverrides() {
-        try { return getCurrentSession()?.overrides || {}; } catch(_) { return {}; }
+        try { return getActiveSession(false)?.overrides || {}; } catch(_) { return {}; }
     }
 
     function getEffectiveSettings() {
@@ -5895,7 +7232,7 @@ replacement text
     }
 
     function hasSessionOverrides() {
-        try { const o = getCurrentSession()?.overrides; return !!(o && Object.keys(o).length > 0); }
+        try { const o = getActiveSession(false)?.overrides; return !!(o && Object.keys(o).length > 0); }
         catch(_) { return false; }
     }
 
@@ -6212,6 +7549,7 @@ replacement text
             });
             return res.ok;
         } catch (e) {
+            _dbgAdd('STORAGE_WRITE_FAILED', { file_id, error: e.message });
             console.error(`[${EXT_DISPLAY}] saveSessionFile error:`, e);
             return false;
         }
@@ -6250,6 +7588,8 @@ replacement text
         }
 
         if (!meta && v0Data) {
+            _dbgAdd('LEGACY_MIGRATION_STARTED');
+
             meta = { activeSessionId: v0Data.activeSessionId, sessions: v0Data.sessions };
         }
 
@@ -6310,6 +7650,7 @@ replacement text
             
             const success = await saveSessionFile(file_id, payload);
             if (success) _bucketDirty = false;
+            else _dbgAdd('STORAGE_WRITE_FAILED', { file_id, reason: 'saveSessionFile returned false' });
         };
 
         if (force) {
@@ -6350,10 +7691,14 @@ replacement text
         return sess;
     }
 
-    function getActiveSession() {
+    function getActiveSession(autoCreate = true) {
         const bucket = getChatBucket();
-        if (!bucket.sessions.length || !bucket.activeSessionId) return createSession(undefined, false, false);
-        return bucket.sessions.find(s => s.id === bucket.activeSessionId) || createSession(undefined, false, false);
+        if (!bucket.sessions.length || !bucket.activeSessionId) {
+            return autoCreate ? createSession(undefined, false, false) : null;
+        }
+        const sess = bucket.sessions.find(s => s.id === bucket.activeSessionId);
+        if (sess) return sess;
+        return autoCreate ? createSession(undefined, false, false) : null;
     }
 
     function setActiveSession(sessionId) {
@@ -6376,11 +7721,11 @@ replacement text
         bucket.activeSessionId = bucket.sessions.length ? bucket.sessions[bucket.sessions.length - 1].id : null;
         saveSessionsToMetadata();
         _dbgAdd('SESSION_DELETED', { id: deletedId });
-        return getActiveSession();
+        return getActiveSession(true);
     }
 
     function getCurrentSession() {
-        return getActiveSession();
+        return getActiveSession(true);
     }
 
     function addMessage(session, role, content, extra = {}) {
@@ -6457,6 +7802,12 @@ replacement text
 
     function getUserPersona() {
         const ctx = SillyTavern.getContext();
+
+        // Aspect: Evolutia — use active persona alter ego fields if available
+        if (getSettings().useAspectEvolutia) {
+            const aePersona = _getAspectEvolutiaPersonaDescription();
+            if (aePersona) return aePersona;
+        }
         
         try {
             let expanded = '';
@@ -6469,12 +7820,22 @@ replacement text
         } catch (_) {}
 
         try {
-            const pu = window.power_user;
-            if (pu) {
-                if (typeof pu.persona_description === 'string' && pu.persona_description) return pu.persona_description;
-                if (pu.personas && pu.persona && pu.personas[pu.persona]?.description) return pu.personas[pu.persona].description;
-                if (typeof pu.persona === 'string' && pu.persona.length > 30 && !pu.persona.endsWith('.json')) return pu.persona;
+            const pu = window.power_user || ctx.powerUserSettings || {};
+            let personaId = window.user_avatar || ctx.user_avatar || ctx.userAvatar || ctx.personaId || ctx.activePersonaId || ctx.active_persona_id;
+            if (!personaId && typeof document !== 'undefined') {
+                const selected = document.querySelector('#user_avatar_block .avatar-container.selected, #persona_container .avatar-container.selected, .persona_selected');
+                if (selected) personaId = selected.getAttribute('data-avatar-id') || selected.dataset?.avatarId;
             }
+            if (typeof personaId === 'object' && personaId !== null) {
+                personaId = personaId.avatarId || personaId.avatar_id || personaId.user_avatar || personaId.userAvatar || personaId.id;
+            }
+
+            if (personaId && pu.persona_descriptions) {
+                const pd = pu.persona_descriptions[personaId];
+                if (typeof pd === 'string') return pd;
+                if (typeof pd === 'object' && pd.description) return pd.description;
+            }
+            if (typeof pu.persona_description === 'string' && pu.persona_description) return pu.persona_description;
         } catch (_) {}
 
         return ctx.persona || ctx.userPersona || ctx.user_persona || '';
@@ -6611,12 +7972,13 @@ replacement text
         const ctx = SillyTavern.getContext();
         if (!ctx.chat) return [];
         
+        const _incHidden = getEffectiveSettings().includeHiddenMessages;
         const extractData = (m, i) => ({
             role: m.is_user ? 'user' : 'assistant',
             name: m.is_user ? (ctx.name1 || 'User') : (m.name || getCharInfo()?.name || 'Character'),
             content: typeof m.mes === 'string' ? m.mes : '',
             chatIndex: i,
-            is_hidden: !!m.is_system || !!m.is_hidden || !!(m.extra && m.extra.is_hidden)
+            is_hidden: (!_incHidden && (!!m.is_system || !!m.is_hidden || !!(m.extra && m.extra.is_hidden))) || !!(m.extra?.sc_ghosted)
         });
 
         try {
@@ -6636,8 +7998,87 @@ replacement text
 
     // ─── Payload Assembly ───────────────────────────────────────────────────────
 
-    async function buildSystemContent(settings) {
-        const parts = [settings.systemPrompt || DEFAULT_SYSTEM_PROMPT];
+    function _getSummaryceptionSummary() {
+        try {
+            const ctx = SillyTavern.getContext();
+            if (ctx.extensionSettings?.summaryception?.enabled === false) return null;
+            const store = ctx.chatMetadata?.summaryception;
+            if (!store || !Array.isArray(store.layers)) return null;
+            const snippets = [];
+            for (let i = store.layers.length - 1; i >= 1; i--) {
+                const layer = store.layers[i];
+                if (layer && layer.length) snippets.push(...layer.map(sn => sn.text).filter(Boolean));
+            }
+            if (store.layers[0] && store.layers[0].length) {
+                snippets.push(...store.layers[0].map(sn => sn.text).filter(Boolean));
+            }
+            if (!snippets.length) return null;
+            const summaryText = snippets.join(' ');
+            const template = ctx.extensionSettings?.summaryception?.injectionTemplate || '<summary>\n{{summary}}\n</summary>';
+            return template.replace('{{summary}}', summaryText).trim();
+        } catch(_) {}
+        return null;
+    }
+
+    function _getAspectEvolutiaCharDescription() {
+        try {
+            const ctx = SillyTavern.getContext();
+            const charId = ctx.characterId;
+            const char = ctx.characters?.[charId];
+            if (!char) return null;
+            const AE_KEY = 'st-description-swap-fields';
+            const state = char.data?.extensions?.[AE_KEY];
+            if (!state || !state.swapEnabled) return null;
+            const activeId = state.activeAlterEgoId || 'base';
+            const alterEgos = Array.isArray(state.alterEgos) ? state.alterEgos : [];
+            const activeEgo = alterEgos.find(a => a.id === activeId) || alterEgos[0];
+            const fields = Array.isArray(activeEgo?.fields) ? activeEgo.fields : (Array.isArray(state.fields) ? state.fields : []);
+            const enabled = fields.filter(f => f.enabled !== false && f.content?.trim());
+            if (!enabled.length) return null;
+            const charName = char.name || char.data?.name || 'Character';
+            const parts = enabled.map(f => `[DEFINITION: ${f.name?.trim() || 'Field'}]\n${f.content.trim()}\n[END DEFINITION: ${f.name?.trim() || 'Field'}]`);
+            return `[CHARACTER DEFINITIONS]\nThese definitions apply only to ${charName}.\n\n${parts.join('\n\n')}\n\n[END CHARACTER DEFINITIONS]`;
+        } catch(_) { return null; }
+    }
+
+    function _getAspectEvolutiaPersonaDescription() {
+        try {
+            const ctx = SillyTavern.getContext();
+            const pu = window.power_user || ctx.powerUserSettings || {};
+            
+            let personaId = window.user_avatar || ctx.user_avatar || ctx.userAvatar || ctx.personaId || ctx.activePersonaId || ctx.active_persona_id;
+            if (!personaId && typeof document !== 'undefined') {
+                const selected = document.querySelector('#user_avatar_block .avatar-container.selected, #persona_container .avatar-container.selected, .persona_selected');
+                if (selected) personaId = selected.getAttribute('data-avatar-id') || selected.dataset?.avatarId;
+            }
+            if (typeof personaId === 'object' && personaId !== null) {
+                personaId = personaId.avatarId || personaId.avatar_id || personaId.user_avatar || personaId.userAvatar || personaId.id;
+            }
+            if (!personaId) return null;
+
+            const AE_KEY = 'st-description-swap-fields';
+            const personaState = pu[AE_KEY]?.personaDynamicFields?.[personaId];
+            if (!personaState || !personaState.swapEnabled) return null;
+            
+            const activeId = personaState.activeAlterEgoId || 'base';
+            const alterEgos = Array.isArray(personaState.alterEgos) ? personaState.alterEgos : [];
+            const activeEgo = alterEgos.find(a => a.id === activeId) || alterEgos[0];
+            const fields = Array.isArray(activeEgo?.fields) ? activeEgo.fields : (Array.isArray(personaState.fields) ? personaState.fields : []);
+            const enabled = fields.filter(f => f.enabled !== false && f.content?.trim());
+            if (!enabled.length) return null;
+            
+            let personaName = ctx.name1 || 'User';
+            if (pu.personas && typeof pu.personas[personaId] === 'string') {
+                personaName = pu.personas[personaId];
+            }
+            
+            const parts = enabled.map(f => `[DEFINITION: ${f.name?.trim() || 'Field'}]\n${f.content.trim()}\n[END DEFINITION: ${f.name?.trim() || 'Field'}]`);
+            return `[USER PERSONA DEFINITIONS]\nThese definitions apply only to ${personaName}.\n\n${parts.join('\n\n')}\n\n[END USER PERSONA DEFINITIONS]`;
+        } catch(e) { return null; }
+    }
+
+async function buildSystemContent(settings) {
+        const parts = [(typeof settings.systemPrompt === 'string' && settings.systemPrompt.trim()) ? settings.systemPrompt : DEFAULT_SYSTEM_PROMPT];
         const charInfo = getCharInfo();
         const ctx = SillyTavern.getContext();
 
@@ -6645,6 +8086,22 @@ replacement text
             const sp = getSystemPromptText();
             if (sp) parts.push(`\n\n<st_system_prompt>\n${sp}\n</st_system_prompt>`);
         }
+
+        if (ctx.groupId && ctx.groups) {
+            const group = ctx.groups.find(g => g.id === ctx.groupId);
+            if (group && Array.isArray(group.members)) {
+                const memberNames = group.members.map(m => {
+                    const c = ctx.characters.find(char => char.avatar === m);
+                    return c ? c.name : m;
+                }).filter(Boolean);
+                if (memberNames.length > 0) {
+                    parts.push(`\n<chat_group_members>\nThats chat with multiple characters. Current group members: ${memberNames.join(', ')}\n</chat_group_members>`);
+                }
+            }
+        }
+
+        const memoryBlock = buildMemoryContextBlock()
+        if (memoryBlock) parts.push(memoryBlock);
 
         const lbBlock = await buildLorebookContextBlock(settings);
         if (lbBlock) parts.push(lbBlock);
@@ -6660,14 +8117,16 @@ replacement text
             const userName = ctx.name1 || 'User';
             const personaContent = settings.includeUserPersonality ? getUserPersona() : '';
             const inner = personaContent ? `Name: ${userName}\n${personaContent}` : `Name: ${userName}`;
-            parts.push(`\n\n<${userName}_persona>\n${inner}\n</${userName}_persona>`);
+            parts.push(`\n\n<{{user}}_persona>\n${inner}\n</{{user}}_persona>`);
         }
 
         const aiInstructions = buildLBAIInstructions(settings).trim();
         const charEditDirective = buildCharEditAIInstructions(settings).trim();
         const chatEditDirective = buildChatEditAIInstructions(settings).trim();
+        const memoryAIInstr = buildMemoryAIInstructions().trim();
+        const toolsBlock = buildToolCallsSystemBlock().trim();
 
-        const modules = [aiInstructions, charEditDirective, chatEditDirective].filter(Boolean);
+        const modules = [memoryAIInstr, aiInstructions, charEditDirective, chatEditDirective, toolsBlock].filter(Boolean);
         if (modules.length > 0) {
             parts.push(`\n\n<modules>\n${modules.join('\n\n')}\n</modules>`);
         }
@@ -6677,24 +8136,27 @@ replacement text
 
     function _buildAiContextForHistoryMsg(msg) {
         try {
-            const lines = msg.appliedLines || [];
+            const lines = msg.swipes?.[msg.swipeIndex || 0]?.historyLines || msg.appliedLines || [];
             const entries = lines.map(line => {
                 const plain = line.replace(/\*\*/g, '').replace(/`/g, '');
                 const statusMatch = plain.match(/^[✓✕·]\s+(ACCEPTED|REJECTED|DISMISSED[^:]*)/);
                 const status = statusMatch ? statusMatch[1] : 'UNKNOWN';
                 const restMatch = plain.match(/(?:ACCEPTED|REJECTED|DISMISSED[^:]*): (.+)/);
-                const detail = restMatch ? restMatch[1] : plain;
+                const detail = restMatch ? restMatch[1].trim() : plain;
                 return { status, detail };
             });
+            
+            const ctg = msg.isCharEditHistory ? 'character_card_changes' : (msg.isChatEditHistory ? 'chat_messages_edits' : 'lorebook_changes');
+            
             const obj = {
                 type: 'system_notification',
-                category: msg.isCharEditHistory ? 'character_card_changes' : 'lorebook_changes',
+                category: ctg,
                 entries,
             };
-            const jsonStr = JSON.stringify(obj);
-            return `${jsonStr}\n\n[System Note: Your generated code has been deleted to save tokens. This message indicates the user's actions and decisions regarding your proposed changes.]`;
+            const jsonStr = JSON.stringify(obj, null, 2);
+            return `${jsonStr}\n\n[System Note: Your generated \`${ctg}\` code block has been deleted to save tokens. This message indicates the user's actions and decisions regarding your proposed changes. You didn't miss anything and you wrote everything correctly in your message. You don't need to write this code block again]`;
         } catch (_) {
-            return msg.content;
+            return msg.content || '';
         }
     }
 
@@ -6702,6 +8164,7 @@ replacement text
         const messages = [{ role: 'system', content: await buildSystemContent(settings) }];
         const depth = Math.max(0, parseInt(settings.contextDepth) || 0);
         const hasPicked = !!(session.pickedChatIndices && session.pickedChatIndices.length > 0);
+        
         if (depth > 0 || hasPicked) {
             const slice = getMainChatSlice(depth);
             if (slice.length) {
@@ -6710,15 +8173,46 @@ replacement text
                     ...m, content: await applyRegexIfEnabled(m.content, m.role === 'user', chatTotal - m.chatIndex - 1),
                 })));
                 const ctx = SillyTavern.getContext();
-                const stMsgs = ctx.chat || [];
-                const block = processedSlice.map(m => {
-                    const hiddenAttr = m.is_hidden ? ' hidden_from_ai="true"' : '';
-                    return `<msg index="${m.chatIndex}" role="${m.role === 'user' ? 'user' : 'assistant'}"${hiddenAttr}>\n[${m.name}]: ${m.content}\n</msg>`;
+                const visibleSlice = processedSlice.filter(m => !m.is_hidden);
+
+                if (settings.includeAlternateSwipes && visibleSlice.length > 0) {
+                    let lastAstMsg = null;
+                    for (let i = visibleSlice.length - 1; i >= 0; i--) {
+                        if (visibleSlice[i].role === 'assistant') {
+                            lastAstMsg = visibleSlice[i];
+                            break;
+                        }
+                    }
+                    if (lastAstMsg) {
+                        const stChatMsg = ctx.chat[lastAstMsg.chatIndex];
+                        if (stChatMsg && Array.isArray(stChatMsg.swipes) && stChatMsg.swipes.length > 1) {
+                            let swipesXml = '<alternate_swipes>\n';
+                            const activeSwipeId = stChatMsg.swipe_id ?? 0;
+                            stChatMsg.swipes.forEach((sw, idx) => {
+                                if (idx === activeSwipeId) return;
+                                const text = typeof sw === 'string' ? sw : (sw.mes || '');
+                                if (text) swipesXml += `<swipe index="${idx}">\n${text}\n</swipe>\n`;
+                            });
+                            swipesXml += '</alternate_swipes>\n';
+                            lastAstMsg.content = swipesXml + lastAstMsg.content;
+                        }
+                    }
+                }
+
+                const block = visibleSlice.map(m => {
+                    return `<msg index="${m.chatIndex}" role="${m.role === 'user' ? 'user' : 'assistant'}">\n${m.content}\n</msg>`;
                 }).join('\n\n');
-                const ctxAttr = hasPicked ? `picked_messages="${slice.length}"` : `last_messages="${slice.length}"`;
+                
+                let summaryText = '';
+                if (settings.includeSummaryception !== false) {
+                    const scSummary = _getSummaryceptionSummary();
+                    if (scSummary) summaryText = `\n<summary_context>\n${scSummary}\n</summary_context>\n\n`;
+                }
+
+                const ctxAttr = hasPicked ? `picked_messages="${visibleSlice.length}"` : `last_messages="${visibleSlice.length}"`;
                 messages.push({
                     role: 'user',
-                    content: `<roleplay_context ${ctxAttr}>\n\n${block}\n\n</roleplay_context>`,
+                    content: `<roleplay_context ${ctxAttr}>\n${summaryText}${block}\n\n</roleplay_context>`,
                 });
                 messages.push({ role: 'assistant', content: 'Understood. I have reviewed the current roleplay context. How can I help?' });
             }
@@ -6726,11 +8220,33 @@ replacement text
         const limit = Math.max(1, parseInt(settings.localHistoryLimit) || 50);
         for (const m of session.messages.slice(-limit)) {
             let content = m.content;
+            
+            const currentSwipe = m.swipes?.[m.swipeIndex || 0];
+            const hasAttachedHistory = currentSwipe?.historyLines?.length > 0;
+
             if (m.isLBHistory || m.isCharEditHistory || m.isChatEditHistory) {
                 content = _buildAiContextForHistoryMsg(m);
+                messages.push({ role: 'user', content: _mergeContent(content, m.attachments) });
+            } else {
+                const finalContent = _mergeContent(content, m.attachments);
+                let apiRole = m.role;
+                if (apiRole === 'system') apiRole = 'user';
+                
+                messages.push({ role: apiRole, content: finalContent });
+
+                if (hasAttachedHistory) {
+                    let cat = 'system_action_results';
+                    const firstLine = currentSwipe.historyLines[0] || '';
+                    if (firstLine.includes('Character') || firstLine.includes('Tags') || firstLine.includes('Description') || firstLine.includes('Personality')) cat = 'character_card_changes';
+                    else if (firstLine.includes('message')) cat = 'chat_messages_edits';
+                    else cat = 'lorebook_changes';
+
+                    const dummy = { appliedLines: currentSwipe.historyLines, isCharEditHistory: cat === 'character_card_changes', isChatEditHistory: cat === 'chat_messages_edits' };
+                    const historyContext = _buildAiContextForHistoryMsg(dummy);
+                    
+                    messages.push({ role: 'user', content: historyContext });
+                }
             }
-            const finalContent = _mergeContent(content, m.attachments);
-            messages.push({ role: m.role, content: finalContent });
         }
         if (pendingUserText !== null && pendingUserText !== undefined) {
             const finalContent = _mergeContent(pendingUserText, pendingAtts);
@@ -6770,6 +8286,187 @@ replacement text
 
         const abort = new AbortController();
         _abortController = abort;
+
+        const streamSetting = settings.forceStreaming;
+        let useStream;
+
+        if (streamSetting === 'on' || streamSetting === true) {
+            useStream = true;
+        } else if (streamSetting === 'off') {
+            useStream = false;
+        } else {
+            useStream = !!(document.getElementById('stream_toggle')?.checked
+                ?? ctx.chatCompletionSettings?.stream_openai
+                ?? ctx.textCompletionSettings?.streaming
+                ?? true);
+        }
+
+        // Couldnt get the reasoning block via "extractData: true" (maybe skill issue), so Im building my own extractor
+        function deepExtract(obj) {
+            if (!obj || typeof obj !== 'object') return { t: '', r: null };
+            
+            let r = null;
+            
+            // 1. SillyTavern extracted data & Ollama
+            if (typeof obj.state?.reasoning === 'string' && obj.state.reasoning !== '') r = obj.state.reasoning;
+            else if (typeof obj.reasoning === 'string' && obj.reasoning !== '') r = obj.reasoning;
+            else if (typeof obj.reasoning_content === 'string' && obj.reasoning_content !== '') r = obj.reasoning_content;
+            else if (typeof obj.thinking === 'string' && obj.thinking !== '') r = obj.thinking;
+
+            // 2. OpenAI / DeepSeek / Custom (Nested)
+            else if (typeof obj.original_response?.choices?.[0]?.message?.reasoning === 'string' && obj.original_response.choices[0].message.reasoning !== '') r = obj.original_response.choices[0].message.reasoning;
+            else if (typeof obj.original_response?.choices?.[0]?.message?.reasoning_content === 'string' && obj.original_response.choices[0].message.reasoning_content !== '') r = obj.original_response.choices[0].message.reasoning_content;
+            else if (typeof obj.choices?.[0]?.message?.reasoning === 'string' && obj.choices[0].message.reasoning !== '') r = obj.choices[0].message.reasoning;
+            else if (typeof obj.choices?.[0]?.message?.reasoning_content === 'string' && obj.choices[0].message.reasoning_content !== '') r = obj.choices[0].message.reasoning_content;
+            else if (typeof obj.choices?.[0]?.delta?.reasoning === 'string' && obj.choices[0].delta.reasoning !== '') r = obj.choices[0].delta.reasoning;
+            else if (typeof obj.choices?.[0]?.delta?.reasoning_content === 'string' && obj.choices[0].delta.reasoning_content !== '') r = obj.choices[0].delta.reasoning_content;
+
+            // 3. Google (Gemini) - Makersuite / VertexAI
+            if (!r) {
+                const getGeminiThoughts = (src) => {
+                    if (Array.isArray(src?.responseContent?.parts)) return src.responseContent.parts;
+                    if (Array.isArray(src?.candidates?.[0]?.content?.parts)) return src.candidates[0].content.parts;
+                    return [];
+                };
+                const geminiParts = [...getGeminiThoughts(obj), ...getGeminiThoughts(obj.original_response)];
+                const geminiThoughts = geminiParts.filter(p => p.thought || p.thought === null).map(p => p.text).filter(Boolean);
+                if (geminiThoughts.length > 0) r = geminiThoughts.join('\n\n');
+            }
+            
+            // 4. Claude (Anthropic)
+            if (!r) {
+                const getClaudeThoughts = (src) => Array.isArray(src?.content) ? src.content : [];
+                const claudeParts = [...getClaudeThoughts(obj), ...getClaudeThoughts(obj.original_response)];
+                const claudeThoughts = claudeParts.filter(p => p.type === 'thinking').map(p => p.thinking).filter(Boolean);
+                if (claudeThoughts.length > 0) r = claudeThoughts.join('\n\n');
+            }
+                
+            // 5. Mistral AI
+            if (!r) {
+                const getMistralContent = (src) => Array.isArray(src?.choices?.[0]?.message?.content) ? src.choices[0].message.content : [];
+                const mistralParts = [...getMistralContent(obj), ...getMistralContent(obj.original_response)];
+                let mistralThoughts = [];
+                for (const part of mistralParts) {
+                    if (Array.isArray(part.thinking)) mistralThoughts.push(...part.thinking.map(t => t.text).filter(Boolean));
+                    else if (part.type === 'thinking' || part.thinking) mistralThoughts.push(typeof part.thinking === 'string' ? part.thinking : part.text);
+                }
+                if (mistralThoughts.length > 0) r = mistralThoughts.join('\n\n');
+            }
+
+            // Text content extraction
+            let t = '';
+            if (typeof obj.text === 'string' && obj.text !== '') t = obj.text;
+            else if (typeof obj.content === 'string' && obj.content !== '') t = obj.content;
+            else if (Array.isArray(obj.content)) {
+                const textParts = obj.content.filter(p => p.type === 'text' || (p.text && !p.thought && p.type !== 'thinking')).map(p => p.text).filter(Boolean);
+                if (textParts.length > 0) t = textParts.join('\n');
+            }
+            else if (Array.isArray(obj.responseContent?.parts)) {
+                const textParts = obj.responseContent.parts.filter(p => !p.thought && p.thought !== null).map(p => p.text).filter(Boolean);
+                if (textParts.length > 0) t = textParts.join('\n');
+            }
+            else if (typeof obj.message?.content === 'string' && obj.message.content !== '') t = obj.message.content;
+            else if (typeof obj.original_response?.choices?.[0]?.message?.content === 'string' && obj.original_response.choices[0].message.content !== '') t = obj.original_response.choices[0].message.content;
+            else if (typeof obj.choices?.[0]?.message?.content === 'string' && obj.choices[0].message.content !== '') t = obj.choices[0].message.content;
+            else if (typeof obj.choices?.[0]?.delta?.content === 'string' && obj.choices[0].delta.content !== '') t = obj.choices[0].delta.content;
+            else if (typeof obj.choices?.[0]?.text === 'string' && obj.choices[0].text !== '') t = obj.choices[0].text;
+            else if (typeof obj.results?.[0]?.text === 'string' && obj.results[0].text !== '') t = obj.results[0].text;
+            else if (Array.isArray(obj.original_response?.candidates?.[0]?.content?.parts)) {
+                const textParts = obj.original_response.candidates[0].content.parts.filter(p => !p.thought && p.thought !== null).map(p => p.text).filter(Boolean);
+                if (textParts.length > 0) t = textParts.join('\n');
+            }
+            else if (Array.isArray(obj.candidates?.[0]?.content?.parts)) {
+                const textParts = obj.candidates[0].content.parts.filter(p => !p.thought && p.thought !== null).map(p => p.text).filter(Boolean);
+                if (textParts.length > 0) t = textParts.join('\n');
+            }
+
+            return { t, r };
+        }
+
+        // ── CUSTOM ENDPOINT LOGIC ──
+        if (settings.connectionSource === 'custom') {
+            let text = '';
+            let reasoning = null;
+            let reasoningStartMs = null;
+            let reasoningDone = false;
+
+            try {
+                const url = (settings.customUrl || 'http://localhost:5000/v1').replace(/\/+$/, '') + '/chat/completions';
+                const payload = {
+                    model: settings.customModel || 'gpt-3.5-turbo',
+                    messages: messages,
+                    max_tokens: maxTokens,
+                    stream: useStream
+                };
+                const headers = { 'Content-Type': 'application/json' };
+                if (settings.customKey) headers['Authorization'] = `Bearer ${settings.customKey}`;
+
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(payload),
+                    signal: abort.signal
+                });
+
+                if (!res.ok) {
+                    const errText = await res.text().catch(() => res.statusText);
+                    throw new Error(`Custom API Error ${res.status}: ${errText}`);
+                }
+
+                if (useStream) {
+                    const reader = res.body.getReader();
+                    const decoder = new TextDecoder("utf-8");
+                    let buffer = "";
+
+                    while (true) {
+                        if (abort.signal.aborted) { _abortController = null; return null; }
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop(); 
+
+                        for (const line of lines) {
+                            const l = line.trim();
+                            if (!l || l.startsWith(':') || l === 'data: [DONE]') continue;
+                            if (l.startsWith('data: ')) {
+                                try {
+                                    const data = JSON.parse(l.slice(6));
+                                    const ext = deepExtract(data);
+                                    if (ext.t) text += ext.t;
+                                    if (ext.r) {
+                                        if (reasoningStartMs === null) reasoningStartMs = performance.now();
+                                        reasoning = (reasoning || '') + ext.r;
+                                    }
+                                    if (text && !reasoningDone && reasoning) {
+                                        reasoningDone = true;
+                                        data._finalReasoningMs = performance.now() - reasoningStartMs;
+                                    }
+                                    if (typeof onChunk === 'function') {
+                                        const rMs = reasoningDone && data._finalReasoningMs ? data._finalReasoningMs : (reasoningStartMs !== null ? performance.now() - reasoningStartMs : null);
+                                        onChunk(text, reasoning, rMs, reasoningDone);
+                                    }
+                                } catch (e) {}
+                            }
+                        }
+                    }
+                } else {
+                    const data = await res.json();
+                    const ext = deepExtract(data);
+                    text = ext.t || '';
+                    reasoning = ext.r;
+                }
+            } catch (e) {
+                _abortController = null;
+                if (abort.signal.aborted || e?.name === 'AbortError') return null;
+                throw e;
+            }
+
+            _abortController = null;
+            return { text: text.trim(), reasoning, isMaxTokens: false };
+        }
+        // ── END CUSTOM ENDPOINT LOGIC ──
 
         const service = ctx.ConnectionManagerRequestService;
         if (!service || typeof service.sendRequest !== 'function') {
@@ -6812,75 +8509,67 @@ replacement text
             throw new Error('No active profile found. Please select a profile in the SillyTavern Connection Manager UI, or assign a specific profile in ST-Copilot settings.');
         }
 
-        const activeProfile = profiles.find(p => p.id === profileId);
-        if (activeProfile) {
-            if (!activeProfile.api) {
-                if (typeof window.getGeneratingApi === 'function') {
-                    activeProfile.api = window.getGeneratingApi();
-                } else {
-                    const mainApi = ctx.main_api || ctx.mainApi || document.getElementById('main_api')?.value;
-                    if (mainApi === 'openai') {
-                        activeProfile.api = ctx.chatCompletionSettings?.chat_completion_source || 'openai';
-                    } else if (mainApi === 'textgenerationwebui') {
-                        activeProfile.api = ctx.textCompletionSettings?.type || 'textgenerationwebui';
-                    } else {
-                        activeProfile.api = mainApi;
-                    }
-                }
-            }
-            if (!activeProfile.model) {
-                if (typeof window.getGeneratingModel === 'function') {
-                    activeProfile.model = window.getGeneratingModel();
-                } else if (typeof ctx.getChatCompletionModel === 'function') {
-                    activeProfile.model = ctx.getChatCompletionModel();
-                } else {
-                    const sel = document.getElementById(`model_${activeProfile.api}_select`) || document.querySelector('select[id^="model_"]:visible');
-                    if (sel && sel.value) {
-                        activeProfile.model = sel.value;
-                    }
-                }
-            }
-            console.debug(`[ST-Copilot] Hydrated connection profile "${profileId}": api=${activeProfile.api}, model=${activeProfile.model}`);
-        }
-
-        const streamSetting = settings.forceStreaming;
-        let useStream;
-
-        if (streamSetting === 'on' || streamSetting === true) {
-            useStream = true;
-        } else if (streamSetting === 'off') {
-            useStream = false;
-        } else {
-            let autoStream = false;
-            try {
-                const profileObj = profiles.find(p => p.id === profileId);
-                const api = profileObj?.api || ctx.main_api || document.getElementById('main_api')?.value;
-                
-                if (['openai', 'claude', 'google', 'scale'].includes(api)) {
-                    autoStream = ctx.chatCompletionSettings?.stream_openai ?? !!document.getElementById('stream_toggle')?.checked;
-                } else if (api === 'textgenerationwebui' || api === 'kobold') {
-                    autoStream = ctx.textCompletionSettings?.streaming ?? !!document.getElementById('stream_toggle')?.checked;
-                } else {
-                    autoStream = !!document.getElementById('stream_toggle')?.checked;
-                }
-            } catch (err) {
-                autoStream = !!document.getElementById('stream_toggle')?.checked;
-            }
-            useStream = autoStream;
-        }
-
         let asyncGeneratorFn;
+        const origFetch = window.fetch;
+        
+        window.fetch = async function(...args) {
+            let requestUrl = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url ? args[0].url : '');
+            if ((requestUrl.includes('/generate') || requestUrl.includes('/caption-image')) && args[1] && typeof args[1].body === 'string') {
+                try {
+                    let reqBody = JSON.parse(args[1].body);
+                    let changed = false;
+                    
+                    if (reqBody.reasoning_effort === 'auto') { delete reqBody.reasoning_effort; changed = true; }
+                    else if (reqBody.reasoning_effort === 'min') { reqBody.reasoning_effort = 'low'; changed = true; }
+                    else if (reqBody.reasoning_effort === 'max') { reqBody.reasoning_effort = 'high'; changed = true; }
+
+                    if (reqBody.reasoning && typeof reqBody.reasoning === 'object') {
+                        if (reqBody.reasoning.effort === 'auto') { delete reqBody.reasoning.effort; changed = true; }
+                        else if (reqBody.reasoning.effort === 'min') { reqBody.reasoning.effort = 'low'; changed = true; }
+                        else if (reqBody.reasoning.effort === 'max') { reqBody.reasoning.effort = 'high'; changed = true; }
+                    }
+
+                    if (reqBody.custom_prompt_post_processing === '') { delete reqBody.custom_prompt_post_processing; changed = true; }
+                    if (reqBody.request_image_resolution === '') { delete reqBody.request_image_resolution; changed = true; }
+                    if (reqBody.request_image_aspect_ratio === '') { delete reqBody.request_image_aspect_ratio; changed = true; }
+                    
+                    if (changed) args[1].body = JSON.stringify(reqBody);
+                } catch(_) {}
+            }
+            return origFetch.apply(this, args);
+        };
+
         try {
             asyncGeneratorFn = await service.sendRequest(profileId, messages, maxTokens, {
                 stream: useStream,
                 signal: abort.signal,
-                extractData: useStream, 
+                extractData: false,
                 includePreset: true
             });
         } catch (e) {
-            _abortController = null;
-            if (abort.signal.aborted || e?.name === 'AbortError' || e?.message === 'userStopped') return null;
-            throw e;
+            if (useStream && !abort.signal.aborted && e?.name !== 'AbortError' && e?.message !== 'userStopped') {
+                console.warn(`[${EXT_DISPLAY}] Streaming failed, falling back to non-streaming:`, e);
+                _dbgAdd('GEN_STREAM_FALLBACK', { error: e.message || String(e) });
+                useStream = false;
+                try {
+                    asyncGeneratorFn = await service.sendRequest(profileId, messages, maxTokens, {
+                        stream: false,
+                        signal: abort.signal,
+                        extractData: false,
+                        includePreset: true
+                    });
+                } catch (err2) {
+                    _abortController = null;
+                    if (abort.signal.aborted || err2?.name === 'AbortError' || err2?.message === 'userStopped') return null;
+                    throw err2;
+                }
+            } else {
+                _abortController = null;
+                if (abort.signal.aborted || e?.name === 'AbortError' || e?.message === 'userStopped') return null;
+                throw e;
+            }
+        } finally {
+            window.fetch = origFetch;
         }
 
         let text = '';
@@ -6891,30 +8580,6 @@ replacement text
         const isGen = typeof asyncGeneratorFn === 'function' ||
             (asyncGeneratorFn != null && typeof asyncGeneratorFn[Symbol.asyncIterator] === 'function') ||
             (asyncGeneratorFn != null && typeof asyncGeneratorFn.next === 'function');
-
-        // Couldnt get the reasoning block via "extractData: true" (maybe skill issue), so Im building my own extractor
-        function deepExtract(obj) {
-            if (!obj || typeof obj !== 'object') return { t: '', r: null };
-            
-            let r = null;
-            if (typeof obj.state?.reasoning === 'string' && obj.state.reasoning !== '') r = obj.state.reasoning;
-            else if (typeof obj.reasoning === 'string' && obj.reasoning !== '') r = obj.reasoning;
-            else if (typeof obj.original_response?.choices?.[0]?.message?.reasoning === 'string' && obj.original_response.choices[0].message.reasoning !== '') r = obj.original_response.choices[0].message.reasoning;
-            else if (typeof obj.choices?.[0]?.message?.reasoning === 'string' && obj.choices[0].message.reasoning !== '') r = obj.choices[0].message.reasoning;
-            else if (typeof obj.choices?.[0]?.delta?.reasoning === 'string' && obj.choices[0].delta.reasoning !== '') r = obj.choices[0].delta.reasoning;
-
-            let t = '';
-            if (typeof obj.text === 'string' && obj.text !== '') t = obj.text;
-            else if (typeof obj.content === 'string' && obj.content !== '') t = obj.content;
-            else if (typeof obj.message?.content === 'string' && obj.message.content !== '') t = obj.message.content;
-            else if (typeof obj.original_response?.choices?.[0]?.message?.content === 'string' && obj.original_response.choices[0].message.content !== '') t = obj.original_response.choices[0].message.content;
-            else if (typeof obj.choices?.[0]?.message?.content === 'string' && obj.choices[0].message.content !== '') t = obj.choices[0].message.content;
-            else if (typeof obj.choices?.[0]?.delta?.content === 'string' && obj.choices[0].delta.content !== '') t = obj.choices[0].delta.content;
-            else if (typeof obj.choices?.[0]?.text === 'string' && obj.choices[0].text !== '') t = obj.choices[0].text;
-            else if (typeof obj.results?.[0]?.text === 'string' && obj.results[0].text !== '') t = obj.results[0].text;
-
-            return { t, r };
-        }
 
         let lastValue = null;
 
@@ -6958,10 +8623,13 @@ replacement text
                 }
                 if (text && !reasoningDone && reasoning) {
                     reasoningDone = true;
+                    lastValue._finalReasoningMs = performance.now() - reasoningStartMs;
                 }
 
                 if (typeof onChunk === 'function') {
-                    const reasoningMs = reasoningStartMs !== null ? performance.now() - reasoningStartMs : null;
+                    const reasoningMs = reasoningDone && lastValue?._finalReasoningMs 
+                        ? lastValue._finalReasoningMs 
+                        : (reasoningStartMs !== null ? performance.now() - reasoningStartMs : null);
                     onChunk(text, reasoning, reasoningMs, reasoningDone);
                 }
             }
@@ -7059,9 +8727,17 @@ replacement text
     let _qpIconPickerEl = null;
 
     function showQPIconPicker(anchorEl, currentIcon, onSelect) {
+        if (_qpIconPickerEl && _qpIconPickerEl.__anchor === anchorEl) { 
+            _qpIconPickerEl.remove(); 
+            _qpIconPickerEl = null; 
+            return; 
+        }
         if (_qpIconPickerEl) { _qpIconPickerEl.remove(); _qpIconPickerEl = null; }
+        
         const pop = document.createElement('div');
         pop.className = 'scp-qp-icon-picker';
+        pop.__anchor = anchorEl;
+
         for (const emoji of QP_ICON_POOL) {
             const btn = document.createElement('button');
             btn.className = `scp-qp-icon-option${emoji === currentIcon ? ' active' : ''}`;
@@ -7593,6 +9269,9 @@ replacement text
     function openChatPicker() {
         const overlay = document.getElementById('scp-picker-overlay');
         if (!overlay) return;
+
+        _dbgAdd('PICKER_OPEN');
+
         applyCustomTheme(getSettings().customTheme || THEME_PRESETS.default);
         _pickerLastIdx = -1;
         renderPickerMessages();
@@ -7600,6 +9279,8 @@ replacement text
     }
 
     function closeChatPicker() {
+        _dbgAdd('PICKER_CLOSE');
+
         const overlay = document.getElementById('scp-picker-overlay');
         if (overlay) overlay.style.display = 'none';
     }
@@ -7678,6 +9359,8 @@ replacement text
                 const curMsg = msgs[curIdx];
 
                 if (e.ctrlKey || e.metaKey) {
+                    _dbgAdd('PICKER_SHORTCUT_TRIGGERED', { type: 'ctrl' });
+
                     // Ctrl+click: toggle all messages by same sender
                     const targetState = !row.classList.contains('selected');
                     body.querySelectorAll('.scp-picker-row').forEach(r => {
@@ -7689,6 +9372,8 @@ replacement text
                         }
                     });
                 } else if (e.altKey) {
+                     _dbgAdd('PICKER_SHORTCUT_TRIGGERED', { type: 'alt' });
+
                     // Alt+click: toggle all messages NOT from this sender
                     const targetState = !row.classList.contains('selected');
                     body.querySelectorAll('.scp-picker-row').forEach(r => {
@@ -7700,6 +9385,8 @@ replacement text
                         }
                     });
                 } else if (e.shiftKey && _pickerLastIdx >= 0) {
+                    _dbgAdd('PICKER_SHORTCUT_TRIGGERED', { type: 'shift' });
+
                     const lo = Math.min(_pickerLastIdx, curIdx);
                     const hi = Math.max(_pickerLastIdx, curIdx);
                     const targetState = !row.classList.contains('selected');
@@ -7712,6 +9399,9 @@ replacement text
                     });
                 } else {
                     const sel = row.classList.toggle('selected');
+
+                    _dbgAdd('PICKER_TOGGLE_SINGLE', { idx: curIdx, state: sel });
+
                     cb.classList.toggle('checked', sel);
                     _pickerLastIdx = curIdx;
                 }
@@ -7771,6 +9461,9 @@ replacement text
             const rows = document.querySelectorAll('#scp-picker-body .scp-picker-row');
             const indices = [];
             rows.forEach(r => { if (r.classList.contains('selected')) indices.push(parseInt(r.dataset.idx)); });
+            
+            _dbgAdd('PICKER_APPLY', { count: indices.length });
+            
             setPickedChatIndices(indices);
             closeChatPicker();
         });
@@ -7986,6 +9679,8 @@ replacement text
 
         out = out.replace(/\x00H(scp-hb-\d+)\x00/g, (_, id) => `<div class="scp-html-block-ph" data-hbid="${id}"></div>`);
         out = out.replace(/\x00B(\d+)\x00/g, (_, i) => codeBlocks[+i]);
+        out = out.replace(/\x00TC_(\d+)\x00/g, (_, i) => `<div class="scp-tool-call-ph" data-tcid="${i}"></div>`);
+        out = out.replace(/(<div class="scp-tool-call-ph"[^>]*><\/div>)(?:<br>|\s)*/g, '$1');
 
         return out;
     }
@@ -8105,6 +9800,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         let text = rawText;
         const trimLines = (settings.reasoningTrimStrings || '').split('\n').map(s => s.trim()).filter(Boolean);
         for (const ts of trimLines) text = text.split(ts).join('');
+        
         const pats = [/<think>([\s\S]*?)<\/think>/i, /<thinking>([\s\S]*?)<\/thinking>/i];
         let reasoning = null;
         for (const p of pats) {
@@ -8248,6 +9944,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                         updateSwipeBar(wrap, session, msg.id);
                     }
                 } else {
+                    _dbgAdd('SWIPE_REGEN_TRIGGERED', { msgId: msg.id });
                     _runSwipeRegen(session, msg.id, wrap);
                 }
             });
@@ -8275,6 +9972,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         }
 
         _generating = true;
+        _activeToolCalls = [];
         const settings = getEffectiveSettings();
         setGeneratingState(true);
 
@@ -8322,12 +10020,32 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 cursorEl.className = 'scp-stream-cursor';
                 const bar = document.getElementById('scp-thinking-bar');
                 if (bar) bar.style.display = 'flex';
-                document.getElementById('scp-thinking-text') && (document.getElementById('scp-thinking-text').textContent = 'Streaming…');
             }
             if (streamContentEl) {
-                const { content: disp } = getDisplayContent(text, settings);
+                let procReasoning = reasoning || '';
+                let procText = stripMemoryBlock(text);
+                let tcIndex = 0;
+                
+                if (procReasoning) {
+                    const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
+                    procReasoning = resR.text;
+                    tcIndex = resR.nextIndex;
+                }
+                const resC = extractToolCallPlaceholders(procText, tcIndex);
+                procText = resC.text;
+
+                const { content: disp } = getDisplayContent(procText, settings);
                 streamContentEl.innerHTML = renderMarkdown(disp);
-                if (text) streamContentEl.appendChild(cursorEl);
+                if (procText) streamContentEl.appendChild(cursorEl);
+                postProcessHTMLBlocks(streamContentEl);
+
+                if (tcIndex > 0) {
+                    const liveTCs = parseToolCallsFromText((reasoning || '') + '\n' + text);
+                    const displayed = liveTCs.map((tc, i) => ({
+                        id: `live_${i}`, name: tc.name, input: tc.input, status: 'done', result: undefined
+                    }));
+                    postProcessToolCalls(wrapEl, displayed);
+                }
             }
             smartScrollToBottom();
         };
@@ -8472,6 +10190,9 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         if (!msg || msg.swipes.length < 2) return false;
         const newIdx = msg.swipeIndex + dir;
         if (newIdx < 0 || newIdx >= msg.swipes.length) return false;
+
+        _dbgAdd('SWIPE_NAVIGATE', { msgId, dir, newIdx });
+
         msg.swipeIndex = newIdx;
         msg.content = msg.swipes[newIdx].content;
         msg.reasoning = msg.swipes[newIdx].reasoning || null;
@@ -8500,16 +10221,58 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         bar.style.display = '';
     }
 
+    function extractToolCallPlaceholders(text, startIndex = 0) {
+        let tcIndex = startIndex;
+        let result = text;
+        
+        result = result.replace(/```tool_call\n?([\s\S]*?)```/gi, (match, inner) => {
+            const blockTcs = parseToolCallsFromText(`\`\`\`tool_call\n${inner}\n\`\`\``);
+            let phs = '';
+            const count = Math.max(1, blockTcs.length);
+            for (let i = 0; i < count; i++) {
+                phs += `\x00TC_${tcIndex++}\x00`;
+            }
+            return phs;
+        });
+        
+        result = result.replace(/```tool_call\n?([\s\S]*)$/gi, (match, inner) => {
+            const blockTcs = parseToolCallsFromText(`\`\`\`tool_call\n${inner}\n\`\`\``);
+            let phs = '';
+            const count = Math.max(1, blockTcs.length);
+            for (let i = 0; i < count; i++) {
+                phs += `\x00TC_${tcIndex++}\x00`;
+            }
+            return phs;
+        });
+        
+        return { text: result, nextIndex: tcIndex };
+    }
+
     function _renderMsgBodyContent(msgEl, msg) {
         const settings = getSettings();
-        let displayText = msg.content;
-        let reasoning = null;
-        if (msg.reasoning !== undefined) {
-            reasoning = msg.reasoning || null;
-        } else {
-            const d = getDisplayContent(msg.content, settings);
+        
+        msgEl.querySelectorAll('.scp-tool-call-item').forEach(c => c.remove());
+
+        const cleanContent = stripMemoryBlock(msg.content);
+        let displayText = cleanContent;
+        let reasoning = msg.reasoning !== undefined ? (msg.reasoning || null) : null;
+
+        let tcIndex = 0;
+        if (reasoning) {
+            const resR = extractToolCallPlaceholders(reasoning, tcIndex);
+            reasoning = resR.text;
+            tcIndex = resR.nextIndex;
+        }
+        
+        const resC = extractToolCallPlaceholders(displayText, tcIndex);
+        displayText = resC.text;
+        tcIndex = resC.nextIndex;
+
+        if (msg.reasoning === undefined || msg.reasoning === null) {
+            const d = getDisplayContent(displayText, settings);
             reasoning = d.reasoning;
             displayText = d.content;
+            if (msg.reasoning === undefined) msg.reasoning = reasoning;
         }
 
         const body = msgEl.querySelector('.scp-msg-body');
@@ -8529,7 +10292,9 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 rBlock.innerHTML = `<summary class="scp-reasoning-summary">Reasoning</summary><div class="scp-reasoning-content"></div>`;
                 body.insertBefore(rBlock, body.firstChild);
             }
+            rBlock.style.display = '';
             rBlock.querySelector('.scp-reasoning-content').innerHTML = renderMarkdown(reasoning);
+            postProcessHTMLBlocks(rBlock.querySelector('.scp-reasoning-content'));
         } else if (rBlock) {
             rBlock.remove();
         }
@@ -8553,6 +10318,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             });
             body.insertBefore(attWrap, body.firstChild);
         }
+
         if (contentEl) {
             const lbChanges = parseLBChangesFromText(msg.content);
             const charChanges = parseCharChangesFromText(msg.content);
@@ -8561,7 +10327,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             const needsStrip = lbChanges?.length || charChanges?.length || charCreation || chatChanges?.length;
 
             if (needsStrip) {
-                let stripped = msg.content;
+                let stripped = displayText;
                 if (lbChanges?.length) stripped = stripLBChangesBlock(stripped);
                 if (charChanges?.length) stripped = stripCharChangesBlock(stripped);
                 if (charCreation) stripped = stripCharCreationBlock(stripped);
@@ -8597,6 +10363,16 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         }
 
         _updateMsgTokenCount(msgEl, msg.content, true);
+
+        let liveTCs = msg.toolCalls || [];
+        if (!liveTCs.length && tcIndex > 0) {
+            liveTCs = parseToolCallsFromText((msg.reasoning || '') + '\n' + msg.content).map((tc, i) => ({
+                id: `past_${i}`, name: tc.name, input: tc.input, status: 'done', result: 'Result hidden/expired'
+            }));
+        }
+        if (liveTCs.length) {
+            postProcessToolCalls(msgEl, liveTCs);
+        }
     }
 
     let _tokenCountCache = new Map();
@@ -8792,34 +10568,33 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         const tel = $('scp-token-count');
         if (tel && session) {
             clearTimeout(_tokenCalcTid);
-            if (!_isTokenCalculating) tel.textContent = '... tkns';
             
-            _tokenCalcTid = setTimeout(async () => {
+            _tokenCalcTid = setTimeout(() => {
                 if (_isTokenCalculating) {
                     _pendingTokenCalc = true;
                     return;
                 }
                 
-                const runCalc = async () => {
+                const runCalc = () => {
                     _isTokenCalculating = true;
                     try {
-                        await new Promise(r => setTimeout(r, 0));
-                        
                         const settings = getEffectiveSettings();
                         const currentInput = document.getElementById('scp-input')?.value || '';
                         
-                        const processedAtts = await _processAttachmentsBeforeSend(_pendingAttachments, true);
-                        const messages = await assembleMessages(session, settings, currentInput, processedAtts);
+                        let totalChars = (settings.systemPrompt || DEFAULT_SYSTEM_PROMPT).length;
+                        const limit = Math.max(1, parseInt(settings.localHistoryLimit) || 50);
+                        for (const m of session.messages.slice(-limit)) {
+                            totalChars += (m.content || '').length;
+                        }
+                        const depth = Math.max(0, parseInt(settings.contextDepth) || 0);
+                        const ctx = SillyTavern.getContext();
+                        const chat = ctx.chat || [];
+                        for (const m of chat.slice(-depth)) {
+                            totalChars += (m.mes || '').length;
+                        }
+                        totalChars += currentInput.length;
                         
-                        const fullText = messages.map(m => {
-                            let c = m.content;
-                            if (Array.isArray(c)) {
-                                return c.map(part => part.type === 'text' ? part.text : '').join('\n');
-                            }
-                            return c;
-                        }).join('\n');
-                        
-                        const count = await estimateTokens(fullText);
+                        const count = Math.ceil(totalChars / 3.5);
                         const telNode = $('scp-token-count');
                         if (telNode) telNode.textContent = `~${count} tkns`;
                     } finally {
@@ -8832,7 +10607,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 };
                 
                 runCalc();
-            }, 800);
+            }, 400);
         }
     }
 
@@ -8935,13 +10710,15 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 renderChatProposalCard(chatChanges, wrapEl); 
             } else document.querySelector(`.scp-chat-proposal-card[data-for="${msg.id}"]`)?.remove();
             
-            const displayString = getDisplayContent(stripped, getSettings()).content;
+            const tcRes = extractToolCallPlaceholders(stripped, 0);
+            const displayString = getDisplayContent(tcRes.text, getSettings()).content;
 
             nc.innerHTML = renderMarkdown(displayString);
             postProcessHTMLBlocks(nc);
             ta.replaceWith(nc);
             row.remove();
             wrapEl.classList.remove('is-editing');
+            if (msg.toolCalls?.length) postProcessToolCalls(wrapEl, msg.toolCalls);
         };
 
         cancelBtn.addEventListener('click', () => {
@@ -8987,14 +10764,13 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
 
     async function handleMessageRegen(wrapEl, msg) {
         if (_generating) return;
-        const { charId, chatId } = getBindingKey();
-        const session = getActiveSession(charId, chatId);
+        const session = getCurrentSession();
         const idx = session.messages.findIndex(m => m.id === msg.id);
         if (idx === -1) return;
 
         const isUser = msg.role === 'user';
         
-        const actualMsgsAfter = session.messages.slice(idx + 1).filter(m => !m.isLBHistory);
+        const actualMsgsAfter = session.messages.slice(idx + 1).filter(m => !m.isLBHistory && !m.isCharEditHistory && !m.isChatEditHistory);
         const msgsAfterCount = actualMsgsAfter.length;
 
         let needsConfirm = false;
@@ -9020,14 +10796,18 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         if (isUser) {
             truncateAfter(session, msg.id);
             removeMsgElAfter(msg.id);
+            updateMsgCount(session);
+            recordStat(_SM.regen);
+            runGenerate(session, null, false);
         } else {
-            truncateFrom(session, msg.id);
-            removeMsgElAndBelow(msg.id);
+            if (msgsAfterCount > 0) {
+                truncateAfter(session, msg.id);
+                removeMsgElAfter(msg.id);
+                updateMsgCount(session);
+            }
+            recordStat(_SM.regen);
+            _runSwipeRegen(session, msg.id, wrapEl);
         }
-        
-        updateMsgCount(session);
-        recordStat(_SM.regen);
-        runGenerate(session, null, false);
     }
 
     async function handleDelete(wrapEl, msg) {
@@ -9063,6 +10843,8 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
     let _searchWholeWord = false;
 
     function openSearch() {
+        _dbgAdd('SEARCH_TOGGLE', { state: 'open' });
+
         _searchOpen = true;
         const bar = document.getElementById('scp-search-bar');
         if (bar) {
@@ -9076,6 +10858,8 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
     }
 
     function closeSearch() {
+        _dbgAdd('SEARCH_TOGGLE', { state: 'close' });
+
         _searchOpen = false;
         _searchWholeWord = false;
         document.getElementById('scp-search-bar')?.classList.remove('scp-search-open');
@@ -9140,43 +10924,49 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         while ((n = walker.nextNode())) textNodes.push(n);
 
         const newMarks = [];
-        for (const node of textNodes) {
-            const text = node.nodeValue;
-            const frag = document.createDocumentFragment();
-            let lastIndex = 0;
+        
+        try {
+            for (const node of textNodes) {
+                const text = node.nodeValue;
+                const frag = document.createDocumentFragment();
+                let lastIndex = 0;
 
-            if (regex) {
-                regex.lastIndex = 0;
-                let match;
-                while ((match = regex.exec(text)) !== null) {
-                    if (match.index > lastIndex) frag.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
-                    const mark = document.createElement('mark');
-                    mark.className = 'scp-search-hl';
-                    mark.textContent = match[0];
-                    frag.appendChild(mark);
-                    newMarks.push(mark);
-                    lastIndex = match.index + match[0].length;
+                if (regex) {
+                    regex.lastIndex = 0;
+                    let match;
+                    while ((match = regex.exec(text)) !== null) {
+                        if (match.index > lastIndex) frag.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+                        const mark = document.createElement('mark');
+                        mark.className = 'scp-search-hl';
+                        mark.textContent = match[0];
+                        frag.appendChild(mark);
+                        newMarks.push(mark);
+                        lastIndex = match.index + match[0].length;
+                    }
+                } else {
+                    const lower = text.toLowerCase();
+                    let idx = lower.indexOf(lq, 0);
+                    if (idx === -1) continue;
+                    while (idx !== -1) {
+                        if (idx > lastIndex) frag.appendChild(document.createTextNode(text.slice(lastIndex, idx)));
+                        const mark = document.createElement('mark');
+                        mark.className = 'scp-search-hl';
+                        mark.textContent = text.slice(idx, idx + _searchQuery.length);
+                        frag.appendChild(mark);
+                        newMarks.push(mark);
+                        lastIndex = idx + _searchQuery.length;
+                        idx = lower.indexOf(lq, lastIndex);
+                    }
                 }
-            } else {
-                const lower = text.toLowerCase();
-                let idx = lower.indexOf(lq, 0);
-                if (idx === -1) continue;
-                while (idx !== -1) {
-                    if (idx > lastIndex) frag.appendChild(document.createTextNode(text.slice(lastIndex, idx)));
-                    const mark = document.createElement('mark');
-                    mark.className = 'scp-search-hl';
-                    mark.textContent = text.slice(idx, idx + _searchQuery.length);
-                    frag.appendChild(mark);
-                    newMarks.push(mark);
-                    lastIndex = idx + _searchQuery.length;
-                    idx = lower.indexOf(lq, lastIndex);
-                }
+
+                if (lastIndex === 0) continue;
+                if (lastIndex < text.length) frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+                node.parentNode.replaceChild(frag, node);
             }
-
-            if (lastIndex === 0) continue;
-            if (lastIndex < text.length) frag.appendChild(document.createTextNode(text.slice(lastIndex)));
-            node.parentNode.replaceChild(frag, node);
+        } catch (e) {
+            _dbgAdd('SEARCH_HIGHLIGHT_DOM_CORRUPTION', { error: e.message });
         }
+
         return newMarks;
     }
 
@@ -9189,6 +10979,9 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         const container = document.getElementById('scp-messages');
         if (!container) return;
         _searchMatches = _applyHighlightsInRoot(container);
+
+        _dbgAdd('SEARCH_QUERY_EXECUTE', { query: _searchQuery, wholeWord: _searchWholeWord, matches: _searchMatches.length });
+
         if (_searchMatches.length) {
             _searchIdx = 0;
             _searchMatches[0].classList.add('scp-search-current');
@@ -9216,6 +11009,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
     async function runGenerate(session, userText, addUserMsg = true, processedAtts = null) {
         if (_generating) return;
         _generating = true;
+        _activeToolCalls = [];
         const settings = getEffectiveSettings();
         setGeneratingState(true);
 
@@ -9270,23 +11064,43 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 cursorEl.className = 'scp-stream-cursor';
 
                 const bar = document.getElementById('scp-thinking-bar');
-                const thinkingText = document.getElementById('scp-thinking-text');
                 if (bar) bar.style.display = 'flex';
-                if (thinkingText) thinkingText.textContent = 'Streaming…';
-            }
-
-            if (reasoning && streamReasoningBlockEl) {
-                streamReasoningBlockEl.style.display = '';
-                streamReasoningContentEl.innerHTML = renderMarkdown(reasoning);
-                const secs = reasoningMs ? (reasoningMs / 1000).toFixed(1) : null;
-                streamReasoningSummaryEl.textContent = reasoningDone
-                    ? `Thought for ${secs}s`
-                    : secs ? `Thinking for ${secs}s…` : 'Thinking…';
             }
 
             if (streamContentEl) {
-                streamContentEl.innerHTML = renderMarkdown(text);
-                if (text) streamContentEl.appendChild(cursorEl);
+                let procReasoning = reasoning || '';
+                let procText = stripMemoryBlock(text);
+                
+                let tcIndex = 0;
+                if (procReasoning) {
+                    const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
+                    procReasoning = resR.text;
+                    tcIndex = resR.nextIndex;
+                }
+                const resC = extractToolCallPlaceholders(procText, tcIndex);
+                procText = resC.text;
+
+                if (reasoning && streamReasoningBlockEl) {
+                    streamReasoningBlockEl.style.display = '';
+                    streamReasoningContentEl.innerHTML = renderMarkdown(procReasoning);
+                    postProcessHTMLBlocks(streamReasoningContentEl);
+                    const secs = reasoningMs ? (reasoningMs / 1000).toFixed(1) : null;
+                    streamReasoningSummaryEl.textContent = reasoningDone
+                        ? `Thought for ${secs}s`
+                        : secs ? `Thinking for ${secs}s…` : 'Thinking…';
+                }
+
+                streamContentEl.innerHTML = renderMarkdown(procText);
+                if (procText) streamContentEl.appendChild(cursorEl);
+                postProcessHTMLBlocks(streamContentEl);
+
+                if (_activeToolCalls.length || tcIndex > 0) {
+                    const liveTCs = parseToolCallsFromText((reasoning || '') + '\n' + text);
+                    const displayed = liveTCs.map((tc, i) => _activeToolCalls[i] || {
+                        id: `live_${i}`, name: tc.name, input: tc.input, status: 'running', result: undefined
+                    });
+                    postProcessToolCalls(streamMsgEl, displayed);
+                }
             }
             smartScrollToBottom();
         };
@@ -9313,9 +11127,153 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 tokensIn
             });
 
-            const result = await callGenerate(session, settings, null, onChunk);
+            let result = await callGenerate(session, settings, null, onChunk);
 
             cleanupCursor();
+            
+            if (result && !result.text.trim() && !result.reasoning?.trim()) {
+                toastr.warning('⚠ Generation failed: AI returned an empty response. Check API limits or Context Size. Also response may be blocked by the provider due to prohibition content.', EXT_DISPLAY, { timeOut: 10000 });
+            }
+
+            // ── Agentic tool call loop ──────────────────────────────────────
+            if (result !== null && settings.toolsEnabled && getEnabledTools().length > 0) {
+                const maxRounds = settings.toolsMaxRounds ?? 5;
+                let roundText = result.text || '';
+                let roundReasoning = result.reasoning;
+                let extraHistory = [];
+
+                let accumulatedText = roundText;
+                let accumulatedReasoning = roundReasoning || null;
+
+                const _updateLiveUI = (tempText = '', tempReasoning = null) => {
+                    if (!streamMsgEl || !streamContentEl) return;
+                    let combinedText = tempText ? accumulatedText + '\n\n' + tempText : accumulatedText;
+                    let combinedReasoning = accumulatedReasoning || '';
+                    if (tempReasoning) {
+                        combinedReasoning = combinedReasoning ? combinedReasoning + '\n\n' + tempReasoning : tempReasoning;
+                    }
+                    
+                    let procReasoning = combinedReasoning;
+                    let procText = stripMemoryBlock(combinedText);
+                    let tcIndex = 0;
+                    
+                    if (procReasoning) {
+                        const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
+                        procReasoning = resR.text;
+                        tcIndex = resR.nextIndex;
+                    }
+                    const resC = extractToolCallPlaceholders(procText, tcIndex);
+                    procText = resC.text;
+
+                    if (combinedReasoning && streamReasoningBlockEl) {
+                        streamReasoningBlockEl.style.display = '';
+                        streamReasoningContentEl.innerHTML = renderMarkdown(procReasoning);
+                        postProcessHTMLBlocks(streamReasoningContentEl);
+                    }
+                    streamContentEl.innerHTML = renderMarkdown(procText);
+                    postProcessHTMLBlocks(streamContentEl);
+
+                    if (_activeToolCalls.length || tcIndex > 0) {
+                        postProcessToolCalls(streamMsgEl, _activeToolCalls);
+                    }
+                    smartScrollToBottom();
+                };
+
+                for (let round = 0; round < maxRounds; round++) {
+                    let tcs = parseToolCallsFromText(roundText);
+                    if (!tcs.length) break;
+
+                    const roundEntries = [];
+                    for (const tc of tcs) {
+                        const tcId = genId('tc');
+                        const entry = { id: tcId, name: tc.name, input: tc.input, status: 'running', result: undefined };
+                        _activeToolCalls.push(entry);
+                        roundEntries.push(entry);
+                        
+                        _updateLiveUI();
+
+                        try {
+                            const res = await executeTool(tc.name, tc.input);
+                            if (res?.__ask_user) {
+                                if (!streamMsgEl) {
+                                    entry.result = { warning: 'ask_user requires streaming to be enabled in order to function.' };
+                                    entry.status = 'warning';
+                                } else {
+                                    entry.result = await executeAskUser(res, streamMsgEl);
+                                    entry.status = 'done';
+                                }
+                            } else {
+                                entry.result = res;
+                                entry.status = 'done';
+                            }
+                        } catch (e) {
+                            _dbgAdd('TOOL_EXECUTION_FAILED', { toolName: tc.name, error: e.message, stack: e.stack });
+                            entry.result = { error: e.message };
+                            entry.status = 'error';
+                        }
+                        
+                        _updateLiveUI();
+                    }
+
+                    extraHistory.push({ role: 'assistant', content: stripMemoryBlock(roundText) });
+                    const toolResultsText = roundEntries.map(e =>
+                        `<tool_result name="${e.name}" status="${e.status}">\n${typeof e.result === 'string' ? e.result : JSON.stringify(e.result, null, 2)}\n</tool_result>`
+                    ).join("\n");
+
+                    extraHistory.push({ role: 'user', content: `<tool_results>\n${toolResultsText}\n</tool_results>\n\nCONTINUE your response using these results. Write exactly where you left off. Without any preliminaries.` });
+
+                    const thinkingText = document.getElementById('scp-thinking-text');
+                    if (thinkingText) thinkingText.textContent = `Round ${round + 2}/${maxRounds + 1}…`;
+                    const bar = document.getElementById('scp-thinking-bar');
+                    if (bar) bar.style.display = 'flex';
+
+                    for (const eh of extraHistory) {
+                        session.messages.push({ id: genId('tc_hist'), role: eh.role, content: eh.content, timestamp: Date.now(), _tcTemp: true });
+                    }
+
+                    isStreaming = false;
+                    streamAccumText = '';
+                    const cursor2 = document.createElement('span');
+                    cursor2.className = 'scp-stream-cursor';
+                    let newText2 = '';
+                    
+                    const tempSession = { 
+                        ...session, 
+                        messages: session.messages.filter(m => m.id !== streamMsgId) 
+                    };
+
+                    const nextResult = await callGenerate(tempSession, settings, null, (t, r) => {
+                        newText2 = t;
+                        _updateLiveUI(t, r);
+                        if (streamContentEl) streamContentEl.appendChild(cursor2);
+                    });
+
+                    session.messages = session.messages.filter(m => !m._tcTemp);
+                    cursor2.remove();
+
+                    if (nextResult === null) break;
+
+                    roundText = nextResult.text || '';
+                    roundReasoning = nextResult.reasoning || null;
+                    
+                    if (!roundText.trim() && !roundReasoning?.trim()) {
+                        toastr.warning(`⚠ Round ${round + 2} failed: AI returned an empty response.<br><br>This usually happens when the <b>Context Length limit</b> is exceeded due to massive tool outputs, or the response was blocked by the provider due to prohibition content.`, EXT_DISPLAY, { timeOut: 12000, escapeHtml: false });
+                        break;
+                    }
+                    
+                    accumulatedText += '\n\n' + roundText;
+                    if (roundReasoning) {
+                        accumulatedReasoning = accumulatedReasoning ? accumulatedReasoning + '\n\n' + roundReasoning : roundReasoning;
+                    }
+                    
+                    result = { text: accumulatedText, reasoning: accumulatedReasoning };
+
+                    if (round === maxRounds - 1) {
+                        _dbgAdd('TOOL_LOOP_MAX_ROUNDS_REACHED', { maxRounds });
+                    }
+                }
+            }
+            // ────────────────────────────────────────────────────────────────
 
             if (result === null) {
                 if (streamMsgId && isStreaming && streamAccumText) {
@@ -9339,39 +11297,21 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             }
 
             const { text: rawFullText, reasoning: fullReasoning } = result;
-            const fullText = normalizeCharNamesInBlock(rawFullText);
+            const rawNormalized = normalizeCharNamesInBlock(rawFullText);
+            processMemoryUpdates(rawNormalized, streamMsgId);
+            const fullText = stripMemoryBlock(rawNormalized);
 
-            if (isStreaming && streamMsgId) {
+            if (streamMsgId) {
                 const msg = session.messages.find(m => m.id === streamMsgId);
-                if (msg) { msg.content = fullText; msg.reasoning = fullReasoning || null; }
+                if (msg) { 
+                    msg.content = fullText; 
+                    msg.reasoning = fullReasoning || null; 
+                    msg.toolCalls = _activeToolCalls.length ? JSON.parse(JSON.stringify(_activeToolCalls)) : undefined; 
+                }
                 saveSettings();
 
-                const lbChanges = parseLBChangesFromText(fullText);
-                const charChanges = parseCharChangesFromText(fullText);
-                const charCreation = parseCharCreationFromText(fullText);
-                const chatChanges = parseChatChangesFromText(fullText);
-                const needsStrip = lbChanges?.length || charChanges?.length || charCreation || chatChanges?.length;
-                if (needsStrip) {
-                    let stripped = fullText;
-                    if (lbChanges?.length) stripped = stripLBChangesBlock(stripped);
-                    if (charChanges?.length) stripped = stripCharChangesBlock(stripped);
-                    if (charCreation) stripped = stripCharCreationBlock(stripped);
-                    if (chatChanges?.length) stripped = stripChatChangesBlock(stripped);
-                    if (streamContentEl) { streamContentEl.innerHTML = renderMarkdown(stripped); postProcessHTMLBlocks(streamContentEl); }
-                    if (lbChanges?.length) renderProposalCard(lbChanges, streamMsgEl);
-                    if (charChanges?.length) renderCharProposalCard(charChanges, streamMsgEl);
-                    if (charCreation) renderCharCreationCard(charCreation, streamMsgEl);
-                    if (chatChanges?.length) renderChatProposalCard(chatChanges, streamMsgEl);
-                } else {
-                    if (streamContentEl) { streamContentEl.innerHTML = renderMarkdown(fullText); postProcessHTMLBlocks(streamContentEl); }
-                }
-
-                if (fullReasoning && streamReasoningBlockEl) {
-                    streamReasoningBlockEl.style.display = '';
-                    streamReasoningContentEl.innerHTML = renderMarkdown(fullReasoning);
-                    streamReasoningSummaryEl.textContent = 'Reasoning';
-                } else if (!fullReasoning && streamReasoningBlockEl) {
-                    streamReasoningBlockEl.style.display = 'none';
+                if (msg && streamMsgEl) {
+                    _renderMsgBodyContent(streamMsgEl, msg);
                 }
 
                 if (msg) {
@@ -9379,9 +11319,9 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                     msg.swipeIndex = 0;
                     saveSessionsToMetadata();
                 }
-                _updateMsgTokenCount(streamMsgEl, fullText);
+                if (streamMsgEl) _updateMsgTokenCount(streamMsgEl, fullText);
             } else {
-                const newMsg = addMessage(session, 'assistant', fullText, { reasoning: fullReasoning || null });
+                const newMsg = addMessage(session, 'assistant', fullText, { reasoning: fullReasoning || null, toolCalls: _activeToolCalls.length ? JSON.parse(JSON.stringify(_activeToolCalls)) : undefined });
                 newMsg.swipes = [{ content: fullText, reasoning: fullReasoning || null }];
                 newMsg.swipeIndex = 0;
                 saveSessionsToMetadata();
@@ -9389,6 +11329,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             }
 
             _refreshSwipeBars(session);
+            _activeToolCalls = [];
 
             if (tokensIn > 0) recordStat(_SM.tokIn, tokensIn);
             const tokensOut = await estimateTokens(fullText);
@@ -9426,17 +11367,19 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
     function _joinContinuation(existing, continuation) {
         if (!continuation) return existing;
         const trimmed = existing.trimEnd();
-        // If existing ends with punctuation/word char, add a space before continuation
         const needsSpace = /[\w.,!?;:'")\]}>]$/.test(trimmed);
         return trimmed + (needsSpace ? ' ' : '') + continuation;
     }
 
     async function runContinue(session, targetMsgId) {
+        _dbgAdd('CONTINUE_TRIGGERED', { targetMsgId });
+        
         if (_generating) return;
         const targetMsg = session.messages.find(m => m.id === targetMsgId);
         if (!targetMsg || targetMsg.role !== 'assistant') return;
 
         _generating = true;
+        _activeToolCalls = [];
         const settings = getEffectiveSettings();
         setGeneratingState(true);
 
@@ -9463,15 +11406,26 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 cursorEl = document.createElement('span');
                 cursorEl.className = 'scp-stream-cursor';
                 const bar = document.getElementById('scp-thinking-bar');
-                const thinkingText = document.getElementById('scp-thinking-text');
                 if (bar) bar.style.display = 'flex';
-                if (thinkingText) thinkingText.textContent = 'Streaming…';
             }
             const combined = _joinContinuation(originalContent, text);
-            const { content: disp } = getDisplayContent(combined, settings);
+            let tcIndex = 0;
+            const resC = extractToolCallPlaceholders(combined, tcIndex);
+            let procText = resC.text;
+
+            const { content: disp } = getDisplayContent(procText, settings);
             if (streamContentEl) {
                 streamContentEl.innerHTML = renderMarkdown(disp);
                 streamContentEl.appendChild(cursorEl);
+                postProcessHTMLBlocks(streamContentEl);
+
+                if (resC.nextIndex > 0) {
+                    const liveTCs = parseToolCallsFromText(combined);
+                    const displayed = liveTCs.map((tc, i) => targetMsg.toolCalls?.[i] || {
+                        id: `live_${i}`, name: tc.name, input: tc.input, status: 'done', result: undefined
+                    });
+                    postProcessToolCalls(targetEl, displayed);
+                }
             }
             smartScrollToBottom();
         };
@@ -9537,7 +11491,9 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 return;
             }
 
-            const { text: continuation, isMaxTokens } = result;
+            const { text: rawContinuation, isMaxTokens } = result;
+            processMemoryUpdates(rawContinuation, targetMsgId);
+            const continuation = stripMemoryBlock(rawContinuation);
             const combined = _joinContinuation(originalContent, continuation);
             
             if (isMaxTokens) {
@@ -9546,7 +11502,6 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
 
             targetMsg.content = combined;
 
-            // Update swipe data
             if (targetMsg.swipes && targetMsg.swipeIndex !== undefined) {
                 targetMsg.swipes[targetMsg.swipeIndex] = { content: combined, reasoning: targetMsg.reasoning || null };
             }
@@ -9940,7 +11895,13 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
     function setGeneratingState(on) {
         const bar = $('scp-thinking-bar'), sendBtn = $('scp-send-btn'),
               input = $('scp-input'), regenBtn = $('scp-regen-btn');
-        if (bar) bar.style.display = on ? 'flex' : 'none';
+        if (bar) {
+            bar.style.display = on ? 'flex' : 'none';
+            if (on) {
+                const t = $('scp-thinking-text');
+                if (t) t.textContent = 'Thinking…';
+            }
+        }
         if (sendBtn) sendBtn.disabled = on;
         if (input) input.disabled = on;
         if (regenBtn) regenBtn.disabled = on;
@@ -9993,7 +11954,8 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         const input = $('scp-input'); if (!input) return;
         const rawText = input.value.trim();
         if (!rawText && !_pendingAttachments.length || _generating) return;
-        const text = expandMacros(rawText || '');
+        const _s = getEffectiveSettings();
+        const text = _s.autoExpandMacros ? expandMacros(rawText || '') : (rawText || '');
         input.value = ''; autoResize(input);
         
         const processedAtts = await _processAttachmentsBeforeSend(_pendingAttachments, false);
@@ -10022,17 +11984,203 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
 
     // ─── Context Inspector ──────────────────────────────────────────────────────
 
+    let _lastInspectorMessages = [];
+
+    function _highlightContextText(raw) {
+        const events = [];
+        const masterRe = /(```[\s\S]*?(?:```|$))|(`[^`\n]*`)|(<\/?[\w:{}_-][\w:{}_.\s"'/=-]*(?:\s[^>]*)?>|<!--[\s\S]*?-->)|(\{\{[^}\n]+\}\})/gi;
+        
+        let m;
+        masterRe.lastIndex = 0;
+        while ((m = masterRe.exec(raw)) !== null) {
+            if (m[1] !== undefined) {
+                events.push([m.index, masterRe.lastIndex, 'code_block', m[1]]);
+            } else if (m[2] !== undefined) {
+                events.push([m.index, masterRe.lastIndex, 'inline_code', m[2]]);
+            } else if (m[3] !== undefined) {
+                events.push([m.index, masterRe.lastIndex, 'tag', m[3]]);
+            } else if (m[4] !== undefined) {
+                events.push([m.index, masterRe.lastIndex, 'macro', m[4]]);
+            }
+        }
+
+        let html = '', last = 0;
+        const KNOWN = new Set(['system_prompt','character_information','lorebook_context','st_system_prompt','persistent_memory','summary_context','lorebook_management','character_management','chat_messages_editing','roleplay_context','entity_definitions','persona_configuration','operational_guidelines','{{user}}_persona', 'tool_calls_system', 'memory_system']);
+
+        let currentDepth = 0;
+
+        for (const [start, end, type, match] of events) {
+            if (start < last) continue;
+            html += escHtml(raw.slice(last, start));
+            
+            if (type === 'tag') {
+                const isClose = match.startsWith('</');
+                const isSelfClose = match.endsWith('/>');
+                const isComment = match.startsWith('<!--');
+
+                let applyDepth;
+                if (isComment || isSelfClose) {
+                    applyDepth = currentDepth;
+                } else if (isClose) {
+                    currentDepth = Math.max(0, currentDepth - 1);
+                    applyDepth = currentDepth;
+                } else {
+                    applyDepth = currentDepth;
+                    currentDepth++;
+                }
+
+                const openTag = match.match(/^<([\w:{}_-]+)>$/);
+                if (openTag && KNOWN.has(openTag[1])) {
+                    html += `<span id="scp-ctx-sec-${openTag[1]}" class="scp-ctx-anchor"></span>`;
+                }
+                
+                const depthClass = Math.min(applyDepth, 5);
+                html += `<span class="scp-ctx-hl-tag scp-ctx-hl-tag-d${depthClass}">${escHtml(match)}</span>`;
+            } else if (type === 'macro') {
+                html += `<span class="scp-ctx-hl-macro">${escHtml(match)}</span>`;
+            } else if (type === 'code_block' || type === 'inline_code') {
+                html += escHtml(match);
+            }
+            last = end;
+        }
+        html += escHtml(raw.slice(last));
+        return html;
+    }
+
+    function _buildContextInspectorHTML(messages) {
+        const SECTION_LABELS = {
+            'system_prompt': 'System Prompt', 
+            'persistent_memory': 'Persistent Memory',
+            'lorebook_context': 'Lorebook', 
+            'character_information': 'Character',
+            '{{user}}_persona': 'User Persona',
+            'memory_system': 'Memory Management',
+            'lorebook_management': 'Lorebook Management',
+            'character_management': 'Character Management',
+            'chat_messages_editing': 'Chat Management',
+            'tool_calls_system': 'Tool Calls'
+        };
+        const KNOWN_SECS = new Set(Object.keys(SECTION_LABELS));
+
+        let navHtml = '', bodyHtml = '';
+        let seenSections = new Set();
+        
+        messages.forEach((msg, idx) => {
+            let raw = Array.isArray(msg.content)
+                ? msg.content.map(p => p.type === 'text' ? p.text : '[Image]').join('\n')
+                : (msg.content || '');
+
+            let displayRole = msg.role;
+            if (msg.role === 'user' && raw.includes('"type": "system_notification"')) {
+                displayRole = 'system';
+            }
+
+            const LABELS = { system:'■ SYSTEM', user:'▶ USER', assistant:'◀ ASSISTANT' };
+            const label = (LABELS[displayRole] || displayRole) + (idx > 0 ? ` #${idx}` : '');
+            const blockId = `scp-ctx-b${idx}`;
+
+            navHtml += `<button class="scp-ctx-nav-btn scp-ctx-nav-${displayRole}" data-t="${blockId}">${escHtml(label)}</button>`;
+
+            if (msg.role === 'system') {
+                const tagRe = /<([\w:{}_-]+)>/g;
+                let tm;
+                tagRe.lastIndex = 0;
+                let moduleNavs = '';
+                while ((tm = tagRe.exec(raw)) !== null) {
+                    if (KNOWN_SECS.has(tm[1]) && !seenSections.has(tm[1])) {
+                        seenSections.add(tm[1]);
+                        const secLabel = SECTION_LABELS[tm[1]] || tm[1];
+                        const secId = `scp-ctx-sec-${tm[1]}`;
+                        
+                        if (['memory_system','lorebook_management','character_management','chat_messages_editing', 'tool_calls_system'].includes(tm[1])) {
+                            moduleNavs += `<button class="scp-ctx-nav-btn scp-ctx-nav-sub" data-t="${secId}">&nbsp;&nbsp;◦ ${escHtml(secLabel)}</button>`;
+                        } else {
+                            navHtml += `<button class="scp-ctx-nav-btn scp-ctx-nav-sub" data-t="${secId}">&nbsp;&nbsp;◦ ${escHtml(secLabel)}</button>`;
+                        }
+                    }
+                }
+                if (moduleNavs) {
+                     navHtml += `<details class="scp-ctx-nav-details" open><summary class="scp-ctx-nav-btn" style="color:var(--scp-text)">▼ Modules</summary>${moduleNavs}</details>`;
+                }
+            }
+
+            const highlighted = _highlightContextText(raw);
+            bodyHtml += `<div class="scp-ctx-block" id="${blockId}">`;
+            bodyHtml += `<div class="scp-ctx-block-header scp-ctx-role-${displayRole}">${escHtml(label)}</div>`;
+            bodyHtml += `<div class="scp-ctx-block-sep"></div>`;
+            bodyHtml += `<div class="scp-ctx-block-body"><pre class="scp-ctx-pre">${highlighted}</pre></div>`;
+            bodyHtml += `</div>`;
+        });
+
+        const styleHtml = `<style>
+            .scp-ctx-hl-tag-d0 { color: #eff6ff !important; }
+            .scp-ctx-hl-tag-d1 { color: #bfdbfe !important; }
+            .scp-ctx-hl-tag-d2 { color: #93c5fd !important; }
+            .scp-ctx-hl-tag-d3 { color: rgb(106, 165, 236) !important; }
+            .scp-ctx-hl-tag-d4 { color: rgb(100, 158, 253) !important; }
+            .scp-ctx-hl-tag-d5 { color: rgb(74, 120, 221) !important; }
+        </style>`;
+
+        return `<div class="scp-ctx-inspector">${styleHtml}<nav class="scp-ctx-nav">${navHtml}</nav><div class="scp-ctx-body" id="scp-ctx-body">${bodyHtml}</div></div>`;
+    }
+
     async function openInspector() {
-        const sess = getCurrentSession(); const settings = getEffectiveSettings();
+        const sess = getCurrentSession();
+        const settings = getEffectiveSettings();
         const inputEl = document.getElementById('scp-input');
         const pendingText = inputEl ? inputEl.value.trim() : '';
         const processedAtts = await _processAttachmentsBeforeSend(_pendingAttachments, true);
-        
         const messages = await assembleMessages(sess, settings, pendingText, processedAtts);
-        const fmtEl = $('scp-ctx-formatted'); const jsonEl = $('scp-ctx-json');
-        if (fmtEl) fmtEl.textContent = formatPayloadAsText(messages);
+        _lastInspectorMessages = messages;
+
+        const fmtEl = $('scp-ctx-formatted');
+        const jsonEl = $('scp-ctx-json');
+        
+        const modal = modalEl.querySelector('.scp-modal');
+        if (modal) {
+            modal.style.height = '75vh';
+        }
+        
+        const modalBody = modalEl.querySelector('.scp-modal-body');
+        if (modalBody) {
+            modalBody.style.padding = '0';
+            modalBody.style.overflow = 'hidden';
+            modalBody.style.display = 'flex';
+            modalBody.style.flexDirection = 'column';
+            modalBody.style.height = '100%';
+        }
+
+        if (fmtEl) {
+            fmtEl.style.height = '100%';
+            fmtEl.style.flex = '1';
+            fmtEl.style.overflow = 'hidden';
+            fmtEl.style.padding = '0';
+            fmtEl.innerHTML = _buildContextInspectorHTML(messages);
+            
+            fmtEl.querySelectorAll('.scp-ctx-nav-btn[data-t]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const t = document.getElementById(btn.dataset.t);
+                    const bodyContainer = document.getElementById('scp-ctx-body');
+                    if (t && bodyContainer) {
+                        const topPos = t.offsetTop;
+                        bodyContainer.scrollTo({ top: topPos, behavior: 'smooth' });
+                    }
+                });
+            });
+        }
         if (jsonEl) jsonEl.textContent = JSON.stringify(messages, null, 2);
         modalEl.style.display = 'flex';
+        
+        setTimeout(() => {
+            const isJsonActive = document.querySelector('.scp-modal-tab.active')?.dataset.tab === 'json';
+            const targetEl = isJsonActive ? jsonEl : document.getElementById('scp-ctx-body');
+            if (targetEl) {
+                const prevBehavior = targetEl.style.scrollBehavior;
+                targetEl.style.scrollBehavior = 'auto';
+                targetEl.scrollTop = targetEl.scrollHeight;
+                targetEl.style.scrollBehavior = prevBehavior;
+            }
+        }, 0);
     }
 
     // ─── Drag & Resize ──────────────────────────────────────────────────────────
@@ -10351,8 +12499,8 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             const rawX = e.clientX - offsetX;
             const rawY = e.clientY - offsetY;
             
-            const viewportWidth = window.visualViewport ? window.visualViewport.width : window.innerWidth;
-            const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
             
             tx = Math.max(0, Math.min(viewportWidth - 46, rawX));
             ty = Math.max(0, Math.min(viewportHeight - 46, rawY));
@@ -10532,7 +12680,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         customActionsWrap.appendChild(deleteBtn);
         container.appendChild(customActionsWrap);
 
-        // EXTRA SETTINGS (Fit & Dim)
+        // EXTRA SETTINGS
         const extraWrap = document.createElement('div');
         extraWrap.style.cssText = 'margin-top:12px';
 
@@ -10671,7 +12819,15 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             inp.type = 'file';
             inp.multiple = true;
             inp.accept = 'image/*,text/*,.pdf,.json,.txt,.md,.csv,.log,.js,.py,.html,.css';
-            inp.onchange = () => { if (inp.files?.length) _addAttachments(Array.from(inp.files)); };
+            inp.onchange = () => { 
+                if (inp.files?.length) {
+                    const file = inp.files[0];
+
+                    if (file.size > 25 * 1024 * 1024) _dbgAdd('ATTACHMENT_SIZE_EXCEEDED', { name: file.name, size: file.size });
+                    
+                    _addAttachments(Array.from(inp.files)); 
+                }
+            };
             inp.click();
         });
     }
@@ -10730,7 +12886,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         const s = getSettings();
         
         for (const [key, cssVar] of Object.entries(THEME_CSS_MAP)) {
-            if (key === 'font') continue;
+            if (key === 'font' || key === 'fontSize') continue;
             if (theme[key] !== undefined && theme[key] !== '') {
                 let val = theme[key];
                 
@@ -10749,6 +12905,19 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         targets.forEach(t => fontVal
             ? t.style.setProperty('--scp-font', fontVal)
             : t.style.removeProperty('--scp-font'));
+            
+        let fontSizeVal = (theme.fontSize || '').trim();
+        if (/^\d+$/.test(fontSizeVal)) fontSizeVal += 'px';
+        
+        targets.forEach(t => {
+            if (fontSizeVal) {
+                t.style.setProperty('--scp-font-size', fontSizeVal);
+                t.style.fontSize = fontSizeVal;
+            } else {
+                t.style.removeProperty('--scp-font-size');
+                t.style.fontSize = '';
+            }
+        });
     }
 
     // ─── Window State ───────────────────────────────────────────────────────────
@@ -10790,8 +12959,8 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         if (iconEl) {
             const savedIconPos = localStorage.getItem(ICON_STORAGE_KEY);
             let posValid = false;
-            const vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
-            const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
             const iconSize = 46;
 
             if (savedIconPos) {
@@ -10994,6 +13163,13 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             
             const win = document.getElementById(WIN_ID);
             if (!win || win.style.display === 'none') return;
+            
+            const overlays = ['scp-lb-overlay', 'scp-settings-overlay', 'scp-picker-overlay', 'scp-diff-modal', 'scp-changelog-modal'];
+            for (const id of overlays) {
+                const el = document.getElementById(id);
+                if (el && el.style.display !== 'none' && el.style.display !== '') return;
+            }
+            if (document.querySelector('.scp-dialog-overlay.visible')) return;
             
             e.preventDefault();
             e.stopPropagation();
@@ -11211,7 +13387,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         'applyRegexToContext', 'reasoningTrimStrings', 'forceStreaming',
         'charEditAIEnabled', 'charEditPrompt', 'lorebookAIManageEnabled',
         'lorebookManagePrompt', 'lorebookAutoKeyword', 'lorebookSTScanDepth',
-        'lorebookCopilotScanDepth', 'chatEditAIEnabled', 'chatEditPrompt',
+        'lorebookCopilotScanDepth', 'chatEditAIEnabled', 'chatEditPrompt', 'includeAlternateSwipes'
     ];
 
     let _profileSnapshot = null;
@@ -11322,6 +13498,8 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         if (name && s.profiles[name]) {
             loadProfile(name);
             const sel = $('scp-profile-select'); if (sel) sel.value = name;
+        } else if (name && !s.profiles[name]) {
+            _dbgAdd('PROFILE_LOAD_BINDING_MISSING', { name });
         }
     }
 
@@ -11552,10 +13730,15 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             const label = document.createElement('div'); label.className = 'scp-theme-var-label'; label.textContent = def.label;
             const wrap = document.createElement('div'); wrap.className = 'scp-theme-var-wrap';
             const isColorKey = _COLOR_KEYS.has(def.key);
-            const isFontKey = def.key === 'font';
+            const isFontKey = def.key === 'font' || def.key === 'fontSize';
 
             const preview = document.createElement('div'); preview.className = 'scp-theme-var-preview';
-            const curVal = s.customTheme?.[def.key] ?? '';
+            
+            let curVal = s.customTheme?.[def.key] ?? '';
+            if (def.key === 'fontSize' && /^\d+$/.test(curVal)) {
+                curVal += 'px';
+            }
+
             if (isColorKey) {
                 preview.style.background = curVal;
                 preview.style.display = curVal ? '' : 'none';
@@ -11590,6 +13773,11 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 s2.customTheme[def.key] = val;
                 saveSettings();
                 _markDirty('theme');
+                
+                document.querySelectorAll(`input.scp-theme-var-input[data-key="${def.key}"]`).forEach(inp => {
+                    if (inp.value !== val) inp.value = val;
+                });
+
                 if (isColorKey) {
                     if (cssVar) [windowEl, document.getElementById('scp-lb-overlay'), document.getElementById('scp-diff-modal')]
                         .filter(Boolean).forEach(t => t.style.setProperty(cssVar, val));
@@ -11598,19 +13786,26 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 } else if (isFontKey) {
                     clearTimeout(_fontDebounce);
                     _fontDebounce = setTimeout(() => {
-                        const fontVal = val.trim();
+                        let fVal = val.trim();
+                        if (def.key === 'fontSize' && /^\d+$/.test(fVal)) fVal += 'px';
+                        
                         const targets = [windowEl, document.getElementById('scp-lb-overlay'),
                             document.getElementById('scp-diff-modal'), document.getElementById('scp-settings-overlay'),
                             document.getElementById('scp-picker-overlay')].filter(Boolean);
-                        targets.forEach(t => fontVal
-                            ? t.style.setProperty('--scp-font', fontVal)
-                            : t.style.removeProperty('--scp-font'));
+                        targets.forEach(t => {
+                            if (fVal) {
+                                t.style.setProperty(cssVar, fVal);
+                                if (def.key === 'fontSize') t.style.fontSize = fVal;
+                            } else {
+                                t.style.removeProperty(cssVar);
+                                if (def.key === 'fontSize') t.style.fontSize = '';
+                            }
+                        });
                     }, 600);
                 } else {
                     if (cssVar) [windowEl, document.getElementById('scp-lb-overlay'), document.getElementById('scp-diff-modal')]
                         .filter(Boolean).forEach(t => t.style.setProperty(cssVar, val));
                 }
-                if (input.value !== val) input.value = val;
                 updateResetState(val);
             };
             input.addEventListener('input', () => applyVal(input.value));
@@ -11639,18 +13834,34 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
     async function updateProfilesList() {
         const profSel = $('scp-conn-profile'); if (!profSel) return;
         const ctx = SillyTavern.getContext();
-        let profiles = [];
+        const s = getSettings();
+        let currentVal = s.connectionProfileId || '';
 
-        if (ctx.ConnectionManagerRequestService && typeof ctx.ConnectionManagerRequestService.getSupportedProfiles === 'function') {
-            profiles = ctx.ConnectionManagerRequestService.getSupportedProfiles();
+        const service = ctx.ConnectionManagerRequestService;
+        
+        let profiles = [];
+        if (service && typeof service.getSupportedProfiles === 'function') {
+            profiles = service.getSupportedProfiles();
         } else {
             profiles = ctx.extensionSettings?.connectionManager?.profiles || [];
         }
 
-        const s = getSettings(); 
-        const currentVal = s.connectionProfileId || '';
-        profSel.innerHTML = '<option value="">-- Select Profile --</option>';
+        if (currentVal && !profiles.some(p => p.id === currentVal)) {
+            _dbgAdd('PROFILE_GHOST_CLEANUP', { removedId: currentVal });
+            s.connectionProfileId = '';
+            saveSettings();
+            currentVal = '';
+        }
 
+        if (service && typeof service.handleDropdown === 'function') {
+            service.handleDropdown(profSel);
+            if (currentVal && Array.from(profSel.options).some(o => o.value === currentVal)) {
+                profSel.value = currentVal;
+            }
+            return;
+        }
+
+        profSel.innerHTML = '<option value="">-- Select Profile --</option>';
         if (profiles && profiles.length > 0) {
             profiles.forEach(p => {
                 const newOpt = document.createElement('option');
@@ -11672,12 +13883,17 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         const gIdMap = {
             connectionSource: 'scp-sp-conn-source',
             connectionProfileId: 'scp-sp-conn-profile',
+            customUrl: 'scp-sp-custom-url',
+            customKey: 'scp-sp-custom-key',
+            customModel: 'scp-sp-custom-model',
             includeSystemPrompt: 'scp-sp-include-sysprompt',
             includeUserPersonality: 'scp-sp-include-persona',
             applyRegexToContext: 'scp-sp-apply-regex',
             contextDepth: 'scp-sp-depth-slider',
             wobbleWindow: 'scp-sp-wobble-window',
-            performanceMode: 'scp-sp-perf-mode'
+            performanceMode: 'scp-sp-perf-mode',
+            includeSummaryception: 'scp-sp-include-summaryception',
+            useAspectEvolutia: 'scp-sp-use-aspect-evolutia',
         };
         const gId = gIdMap[key];
         if (gId) {
@@ -11689,6 +13905,8 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             if (key === 'connectionSource') {
                 const gPg = document.getElementById('scp-sp-global-profile-group');
                 if (gPg) gPg.style.display = val === 'profile' ? '' : 'none';
+                const cPg = document.getElementById('scp-sp-custom-profile-group');
+                if (cPg) cPg.style.display = val === 'custom' ? '' : 'none';
             }
             if (key === 'contextDepth') {
                 const gDv = document.getElementById('scp-sp-depth-val');
@@ -11719,8 +13937,12 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         const ovIdMap = {
             connectionSource: 'scp-sp-ov-conn-source',
             connectionProfileId: 'scp-sp-ov-conn-profile',
+            customUrl: 'scp-sp-ov-custom-url',
+            customKey: 'scp-sp-ov-custom-key',
+            customModel: 'scp-sp-ov-custom-model',
             includeSystemPrompt: 'scp-sp-ov-include-sysprompt',
             includeUserPersonality: 'scp-sp-ov-include-persona',
+            includeAlternateSwipes: 'scp-sp-ov-include-alt-swipes',
             applyRegexToContext: 'scp-sp-ov-apply-regex',
             contextDepth: 'scp-sp-ov-depth-slider',
             charField_tags: 'scp-sp-ov-ce-tags',
@@ -11750,6 +13972,8 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             if (key === 'connectionSource') {
                 const pg = document.getElementById('scp-sp-ov-profile-group');
                 if (pg) pg.style.display = eff.connectionSource === 'profile' ? '' : 'none';
+                const cg = document.getElementById('scp-sp-ov-custom-profile-group');
+                if (cg) cg.style.display = eff.connectionSource === 'custom' ? '' : 'none';
             }
             if (key === 'contextDepth') {
                 const dv = document.getElementById('scp-sp-ov-depth-val');
@@ -11789,6 +14013,17 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         const wobbleEl = $('scp-wobble-window'); if (wobbleEl) wobbleEl.checked = s.wobbleWindow !== false;
         setC('scp-perf-mode', 'performanceMode');
         setC('scp-char-edit-enabled', 'charEditAIEnabled');
+        setC('scp-memory-enabled', 'memoryEnabled');
+        const memPromptEl = $('scp-memory-prompt');
+        if (memPromptEl) {
+            memPromptEl.value = s.memoryManagePrompt || DEFAULT_MEMORY_PROMPT;
+        }
+        setC('scp-memory-inject', 'memoryInject');
+        setC('scp-tools-enabled', 'toolsEnabled');
+        setC('scp-include-summaryception', 'includeSummaryception');
+        setC('scp-use-aspect-evolutia', 'useAspectEvolutia');
+        setC('scp-auto-expand-macros', 'autoExpandMacros');
+        setC('scp-include-hidden-msgs', 'includeHiddenMessages');
 
         const fsVal = s.forceStreaming === true ? 'on' : (s.forceStreaming === false ? 'auto' : (s.forceStreaming || 'auto'));
         document.querySelectorAll('#scp-st-stream-auto, #scp-st-stream-on, #scp-st-stream-off').forEach(b => {
@@ -11830,7 +14065,13 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             cs.value = s.connectionSource ?? 'default';
             const gGroup = $('scp-profile-group');
             if (gGroup) gGroup.style.display = cs.value === 'profile' ? '' : 'none';
+            const cGroup = $('scp-custom-profile-group');
+            if (cGroup) cGroup.style.display = cs.value === 'custom' ? '' : 'none';
         }
+        
+        setI('scp-custom-url', 'customUrl');
+        setI('scp-custom-key', 'customKey');
+        setI('scp-custom-model', 'customModel');
         
         const spEl = $('scp-sysprompt');
         if (spEl) spEl.value = s.systemPrompt || DEFAULT_SYSTEM_PROMPT;
@@ -11909,6 +14150,9 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             });
         };
 
+        const incAltSwipes = document.getElementById('scp-include-alt-swipes');
+        if (incAltSwipes) incAltSwipes.checked = !!s.includeAlternateSwipes;
+
         bindCheck('scp-enabled', 'enabled', () => {
             const ss = getSettings();
             const btn = $('scp-wand-btn');
@@ -11921,6 +14165,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         bindCheck('scp-hotkey-enabled', 'hotkeyEnabled');
         bindCheck('scp-include-sysprompt', 'includeSystemPrompt', updCtx);
         bindCheck('scp-include-persona', 'includeUserPersonality', updCtx);
+        bindCheck('scp-include-alt-swipes', 'includeAlternateSwipes', updCtx);
         bindCheck('scp-apply-regex', 'applyRegexToContext');
         
         const stUpdateStreamBtns = (val) => {
@@ -11948,6 +14193,10 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         bindCheck('scp-perf-mode', 'performanceMode', () => {
             applyCustomTheme(getSettings().customTheme || THEME_PRESETS.default);
         });
+        bindCheck('scp-include-summaryception', 'includeSummaryception');
+        bindCheck('scp-use-aspect-evolutia', 'useAspectEvolutia');
+        bindCheck('scp-auto-expand-macros', 'autoExpandMacros');
+        bindCheck('scp-include-hidden-msgs', 'includeHiddenMessages');
 
         // Opacity slider (ST drawer)
         const opSlider = $('scp-opacity-slider');
@@ -11999,7 +14248,13 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         bindSelect('scp-conn-source', 'connectionSource', v => {
             const g = $('scp-profile-group');
             if (g) g.style.display = v === 'profile' ? '' : 'none';
+            const c = $('scp-custom-profile-group');
+            if (c) c.style.display = v === 'custom' ? '' : 'none';
         });
+
+        bindInput('scp-custom-url', 'customUrl');
+        bindInput('scp-custom-key', 'customKey');
+        bindInput('scp-custom-model', 'customModel');
 
         if ($('scp-profile-group')) {
             $('scp-profile-group').style.display = s.connectionSource === 'profile' ? '' : 'none';
@@ -12078,8 +14333,6 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
 
         const profSel = $('scp-conn-profile');
         if (profSel) {
-            profSel.addEventListener('mouseenter', updateProfilesList);
-            profSel.addEventListener('focus', updateProfilesList);
             profSel.addEventListener('change', () => { 
                 getSettings().connectionProfileId = profSel.value; 
                 saveSettings(); 
@@ -12192,6 +14445,9 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             const s2 = getSettings(); const { charId } = getBindingKey(); const key = `char_${charId}`;
             if (s2.profileBindings[key] === sel.value) delete s2.profileBindings[key];
             else s2.profileBindings[key] = sel.value;
+            
+            _dbgAdd(s2.profileBindings[key] ? 'PROFILE_BIND' : 'PROFILE_UNBIND', { target: 'char', profile: sel.value });
+            
             saveSettings(); updateBindingSection();
         });
 
@@ -12200,11 +14456,70 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             const s2 = getSettings(); const { charId, chatId } = getBindingKey(); const key = `chat_${charId}_${chatId}`;
             if (s2.profileBindings[key] === sel.value) delete s2.profileBindings[key];
             else s2.profileBindings[key] = sel.value;
+
+            _dbgAdd(s2.profileBindings[key] ? 'PROFILE_BIND' : 'PROFILE_UNBIND', { target: 'chat', profile: sel.value });
+
             saveSettings(); updateBindingSection();
         });
 
         $('scp-open-window')?.addEventListener('click', showWindow);
         $('scp-download-debug')?.addEventListener('click', dbgDownload);
+
+        // ST drawer: Memory
+        const memEnabledStEl = $('scp-memory-enabled');
+        if (memEnabledStEl) {
+            memEnabledStEl.checked = !!getSettings().memoryEnabled;
+            memEnabledStEl.addEventListener('change', () => {
+                getSettings().memoryEnabled = memEnabledStEl.checked; saveSettings();
+                const ovEl = document.getElementById('scp-sp-memory-enabled'); if (ovEl) ovEl.checked = memEnabledStEl.checked;
+            });
+        }
+        const memInjectStEl = $('scp-memory-inject');
+        if (memInjectStEl) {
+            memInjectStEl.checked = !!getSettings().memoryInject;
+            memInjectStEl.addEventListener('change', () => {
+                getSettings().memoryInject = memInjectStEl.checked; saveSettings();
+                const ovEl = document.getElementById('scp-sp-memory-inject'); if (ovEl) ovEl.checked = memInjectStEl.checked;
+            });
+        }
+        $('scp-open-memory-settings')?.addEventListener('click', () => {
+            openSettingsPanel();
+            setTimeout(() => { document.querySelector('[data-sptab="memory"]')?.click(); }, 80);
+        });
+
+        const memPromptEl = $('scp-memory-prompt');
+        if (memPromptEl) {
+            memPromptEl.addEventListener('input', () => {
+                getSettings().memoryManagePrompt = memPromptEl.value;
+                saveSettings();
+                const spEl = document.getElementById('scp-sp-memory-prompt');
+                if (spEl) spEl.value = memPromptEl.value;
+            });
+        }
+        $('scp-reset-memory-prompt')?.addEventListener('click', async () => {
+            const ok = await showCustomDialog({ type: 'confirm', title: 'Reset Prompt', message: 'Reset memory prompt to default?' });
+            if (!ok) return;
+            getSettings().memoryManagePrompt = DEFAULT_MEMORY_PROMPT;
+            saveSettings();
+            if (memPromptEl) memPromptEl.value = DEFAULT_MEMORY_PROMPT;
+            const spEl = document.getElementById('scp-sp-memory-prompt');
+            if (spEl) spEl.value = DEFAULT_MEMORY_PROMPT;
+            toastr.success('Prompt reset.', EXT_DISPLAY);
+        });
+
+        // ST drawer: Tools
+        const toolsEnabledStEl = $('scp-tools-enabled');
+        if (toolsEnabledStEl) {
+            toolsEnabledStEl.checked = !!getSettings().toolsEnabled;
+            toolsEnabledStEl.addEventListener('change', () => {
+                getSettings().toolsEnabled = toolsEnabledStEl.checked; saveSettings();
+                const ovEl = document.getElementById('scp-sp-tools-enabled'); if (ovEl) ovEl.checked = toolsEnabledStEl.checked;
+            });
+        }
+        $('scp-open-tools-settings')?.addEventListener('click', () => {
+            openSettingsPanel();
+            setTimeout(() => { document.querySelector('[data-sptab="tools"]')?.click(); }, 80);
+        });
         const handleClearAllSessions = async () => {
             const ok = await showCustomDialog({ 
                 type: 'confirm', 
@@ -12297,8 +14612,6 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             if (spEl2) spEl2.value = DEFAULT_CHAT_EDIT_DIRECTIVE.trim();
             toastr.success('Chat edit prompt reset.', EXT_DISPLAY);
         });
-
-        // ── NEW SETTINGS ──
 
         // Sound unfocused (ST)
         const soundUnfocusedEl = $('scp-sound-unfocused');
@@ -12421,6 +14734,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
 
         overlay.style.display = 'flex';
         updateSessionOverrideIndicator();
+        updateMemoryDot();
         overlay.querySelectorAll('.scp-sp-tab').forEach(t => t.classList.toggle('active', t.dataset.sptab === 'global'));
         overlay.querySelectorAll('.scp-sp-tab-pane').forEach(p => { p.style.display = p.id === 'scp-sp-pane-global' ? '' : 'none'; });
     }
@@ -12477,6 +14791,13 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         g('scp-sp-conn-source', s.connectionSource ?? 'default');
         const gCp = document.getElementById('scp-sp-global-profile-group');
         if (gCp) gCp.style.display = s.connectionSource === 'profile' ? '' : 'none';
+        const gCus = document.getElementById('scp-sp-custom-profile-group');
+        if (gCus) gCus.style.display = s.connectionSource === 'custom' ? '' : 'none';
+        
+        g('scp-sp-custom-url', s.customUrl);
+        g('scp-sp-custom-key', s.customKey);
+        g('scp-sp-custom-model', s.customModel);
+
         g('scp-sp-max-tokens', s.maxTokens);
         g('scp-sp-history-limit', s.localHistoryLimit);
         
@@ -12523,10 +14844,15 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         g('scp-sp-ov-conn-source', eff.connectionSource ?? 'default');
         const ovPg = document.getElementById('scp-sp-ov-profile-group');
         if (ovPg) ovPg.style.display = eff.connectionSource === 'profile' ? '' : 'none';
+        const ovCus = document.getElementById('scp-sp-ov-custom-profile-group');
+        if (ovCus) ovCus.style.display = eff.connectionSource === 'custom' ? '' : 'none';
         
         g('scp-sp-ov-conn-profile', eff.connectionProfileId ?? '');
 
         const ovi = (id, key) => { const el = document.getElementById(id); if (el) el.value = key in ov ? (ov[key] ?? '') : ''; };
+        ovi('scp-sp-ov-custom-url', 'customUrl');
+        ovi('scp-sp-ov-custom-key', 'customKey');
+        ovi('scp-sp-ov-custom-model', 'customModel');
         ovi('scp-sp-ov-max-tokens', 'maxTokens');
         ovi('scp-sp-ov-history-limit', 'localHistoryLimit');
         ovi('scp-sp-ov-reasoning-trim', 'reasoningTrimStrings');
@@ -12596,6 +14922,32 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         if (spPll) spPll.value = s.pickerPreviewLastLines ?? 0;
         const spIm = document.getElementById('scp-sp-image-mode');
         if (spIm) spIm.value = s.imageAnalysisMode || 'direct';
+
+        // Memory sync
+        const setC2 = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+        const setV2 = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
+        setC2('scp-sp-memory-enabled', s.memoryEnabled);
+        setC2('scp-sp-memory-inject', s.memoryInject);
+        setC2('scp-sp-memory-notify', s.memoryNotify);
+        setV2('scp-sp-memory-scope', s.memoryScope || 'global');
+        setV2('scp-sp-memory-tag', s.memoryTag || 'memory-update');
+
+        // Tools sync
+        setC2('scp-sp-tools-enabled', s.toolsEnabled);
+        setC2('scp-sp-tools-thinking', s.toolsThinking);
+        setV2('scp-sp-tools-max-rounds', s.toolsMaxRounds ?? 5);
+        for (const t of TOOL_DEFINITIONS) {
+            const el = document.getElementById(`scp-sp-tool-${t.id}`);
+            if (el) el.checked = s[t.settingKey] !== false;
+        }
+
+        // Third-party extension support sync
+        setC2('scp-sp-include-summaryception', s.includeSummaryception !== false);
+        setC2('scp-sp-use-aspect-evolutia', s.useAspectEvolutia !== false);
+        setC2('scp-sp-auto-expand-macros', !!s.autoExpandMacros);
+        setC2('scp-sp-include-hidden-msgs', !!s.includeHiddenMessages);
+
+        updateMemoryDot();
     }
 
     async function updateSPConnProfileList() {
@@ -12603,10 +14955,11 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         const s = getSettings();
         const eff = getEffectiveSettings();
         const ctx = SillyTavern.getContext();
-        let profiles = [];
+        const service = ctx.ConnectionManagerRequestService;
 
-        if (ctx.ConnectionManagerRequestService && typeof ctx.ConnectionManagerRequestService.getSupportedProfiles === 'function') {
-            profiles = ctx.ConnectionManagerRequestService.getSupportedProfiles();
+        let profiles = [];
+        if (service && typeof service.getSupportedProfiles === 'function') {
+            profiles = service.getSupportedProfiles();
         } else {
             profiles = ctx.extensionSettings?.connectionManager?.profiles || [];
         }
@@ -12614,7 +14967,23 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         selIds.forEach(sid => {
             const sel = document.getElementById(sid); if (!sel) return;
             const isOverride = sid === 'scp-sp-ov-conn-profile';
-            const targetVal = isOverride ? (eff.connectionProfileId || '') : (s.connectionProfileId || '');
+            let targetVal = isOverride ? (eff.connectionProfileId || '') : (s.connectionProfileId || '');
+
+            if (targetVal && !profiles.some(p => p.id === targetVal)) {
+                if (isOverride) {
+                    setSessionOverride('connectionProfileId', undefined);
+                } else {
+                    s.connectionProfileId = '';
+                    saveSettings();
+                }
+                targetVal = '';
+            }
+
+            if (service && typeof service.handleDropdown === 'function') {
+                profiles = service.getSupportedProfiles();
+            } else {
+                profiles = ctx.extensionSettings?.connectionManager?.profiles || [];
+            }
             sel.innerHTML = '<option value="">-- Select Profile --</option>';
             profiles.forEach(p => { 
                 const o = document.createElement('option'); 
@@ -12678,6 +15047,12 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                     const statsContainer = document.getElementById('scp-sp-stats-container');
                     if (statsContainer) renderStatsPane(statsContainer);
                 }
+                if (pane === 'memory') {
+                    setupMemorySettingsUI();
+                }
+                if (pane === 'tools') {
+                    setupToolsSettingsUI();
+                }
             });
         });
 
@@ -12685,7 +15060,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
 
         const saveGlobal = (key, val, cb) => {
             getSettings()[key] = val; saveSettings();
-            _markDirty('config');
+            _configDirty = true; _updateDirtyDots();
             const stEl = document.getElementById({
                 enabled:'scp-enabled', hotkeyEnabled:'scp-hotkey-enabled', hotkey:'scp-hotkey',
                 searchHotkeyEnabled:'scp-search-hotkey-enabled', searchHotkey:'scp-search-hotkey',
@@ -12697,6 +15072,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 systemPrompt:'scp-sysprompt', lorebookManagePrompt:'scp-lb-manage-prompt',
                 lorebookSTScanDepth:'scp-lb-st-scan-depth', lorebookCopilotScanDepth:'scp-lb-copilot-scan-depth',
                 connectionProfileId:'scp-conn-profile',
+                customUrl: 'scp-custom-url', customKey: 'scp-custom-key', customModel: 'scp-custom-model',
                 opacity:'scp-opacity-slider', ghostModeOpacity:'scp-ghost-opacity',
                 ghostModeHotkeyEnabled:'scp-ghost-hotkey-enabled', ghostModeHotkey:'scp-ghost-hotkey',
                 applyRegexToContext:'scp-apply-regex',
@@ -12705,6 +15081,8 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 lorebookAIManageEnabled: 'scp-lb-ai-enabled-st',
                 lorebookAutoKeyword: 'scp-lb-auto-kw-st',
                 wobbleWindow: 'scp-wobble-window', performanceMode: 'scp-perf-mode',
+                includeSummaryception: 'scp-include-summaryception',
+                useAspectEvolutia: 'scp-use-aspect-evolutia',
             }[key]);
             if (stEl) {
                 if (stEl.type === 'checkbox') stEl.checked = !!val;
@@ -12714,6 +15092,8 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 if (key === 'connectionSource') {
                     const stGroup = document.getElementById('scp-profile-group');
                     if (stGroup) stGroup.style.display = val === 'profile' ? '' : 'none';
+                    const cGroup = document.getElementById('scp-custom-profile-group');
+                    if (cGroup) cGroup.style.display = val === 'custom' ? '' : 'none';
                 }
             }
 
@@ -12721,6 +15101,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             _pruneMatchingOverrides();
 
             if (cb) cb(val);
+            updateMsgCount(getCurrentSession());
         };
 
         const bGCheck = (spId, key, cb) => {
@@ -12808,9 +15189,14 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         bGSelect('scp-sp-conn-source', 'connectionSource', v => {
             const gCp = document.getElementById('scp-sp-global-profile-group');
             if (gCp) gCp.style.display = v === 'profile' ? '' : 'none';
+            const cPg = document.getElementById('scp-sp-custom-profile-group');
+            if (cPg) cPg.style.display = v === 'custom' ? '' : 'none';
             if (v === 'profile') updateSPConnProfileList();
         });
-        document.getElementById('scp-sp-conn-profile')?.addEventListener('mouseenter', updateSPConnProfileList);
+        bGInput('scp-sp-custom-url', 'customUrl');
+        bGInput('scp-sp-custom-key', 'customKey');
+        bGInput('scp-sp-custom-model', 'customModel');
+
         document.getElementById('scp-sp-conn-profile')?.addEventListener('change', e => saveGlobal('connectionProfileId', e.target.value));
 
         bGInput('scp-sp-max-tokens', 'maxTokens', Number);
@@ -12833,6 +15219,11 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         bGCheck('scp-sp-include-persona', 'includeUserPersonality', () => updateMsgCount(getCurrentSession()));
         bGCheck('scp-sp-apply-regex', 'applyRegexToContext');
         bGInput('scp-sp-reasoning-trim', 'reasoningTrimStrings');
+        bGCheck('scp-sp-include-summaryception', 'includeSummaryception');
+        bGCheck('scp-sp-use-aspect-evolutia', 'useAspectEvolutia');
+        bGCheck('scp-sp-auto-expand-macros', 'autoExpandMacros');
+        bGCheck('scp-sp-include-hidden-msgs', 'includeHiddenMessages', () => updateMsgCount(getCurrentSession()));
+        bGCheck('scp-sp-include-alt-swipes', 'includeAlternateSwipes', () => updateMsgCount(getCurrentSession()));
 
         document.getElementById('scp-sp-conn-source')?.addEventListener('change', e => {
             const v = e.target.value;
@@ -12841,7 +15232,6 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             if (gCp) gCp.style.display = v === 'profile' ? '' : 'none';
             if (v === 'profile') updateSPConnProfileList();
         });
-        document.getElementById('scp-sp-conn-profile')?.addEventListener('mouseenter', updateSPConnProfileList);
         document.getElementById('scp-sp-conn-profile')?.addEventListener('change', e => saveGlobal('connectionProfileId', e.target.value, null));
 
         const spPrompt = document.getElementById('scp-sp-sysprompt');
@@ -12897,6 +15287,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 s.charEditFields[fieldKey] = el.checked;
                 saveSettings(); updateMsgCount(getCurrentSession());
                 const stIdMap = {
+                    tags: 'scp-ce-tags',
                     description: 'scp-ce-description', personality: 'scp-ce-personality',
                     scenario: 'scp-ce-scenario', first_mes: 'scp-ce-first-mes',
                     mes_example: 'scp-ce-mes-example', authors_note: 'scp-ce-authors-note',
@@ -13223,9 +15614,13 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             syncOvClear('connectionSource', e.target.value);
             const pg = document.getElementById('scp-sp-ov-profile-group');
             if (pg) pg.style.display = e.target.value === 'profile' ? '' : 'none';
+            const cg = document.getElementById('scp-sp-ov-custom-profile-group');
+            if (cg) cg.style.display = e.target.value === 'custom' ? '' : 'none';
             if (e.target.value === 'profile') updateSPConnProfileList();
         });
-        document.getElementById('scp-sp-ov-conn-profile')?.addEventListener('mouseenter', updateSPConnProfileList);
+        bindOvInput('scp-sp-ov-custom-url', 'customUrl');
+        bindOvInput('scp-sp-ov-custom-key', 'customKey');
+        bindOvInput('scp-sp-ov-custom-model', 'customModel');
         document.getElementById('scp-sp-ov-conn-profile')?.addEventListener('change', e => {
             syncOvClear('connectionProfileId', e.target.value);
         });
@@ -13242,6 +15637,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
 
         bindOvCheck('scp-sp-ov-include-sysprompt', 'includeSystemPrompt');
         bindOvCheck('scp-sp-ov-include-persona', 'includeUserPersonality');
+        bindOvCheck('scp-sp-ov-include-alt-swipes', 'includeAlternateSwipes');
         bindOvCheck('scp-sp-ov-apply-regex', 'applyRegexToContext');
         bindOvCheck('scp-sp-ov-char-edit-enabled', 'charEditAIEnabled');
         bindOvCheck('scp-sp-ov-lb-ai-enabled', 'lorebookAIManageEnabled');
@@ -13289,9 +15685,13 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                     reasoningTrimStrings: ['scp-sp-ov-reasoning-trim'],
                     systemPrompt: ['scp-sp-ov-sysprompt'],
                     connectionSource: ['scp-sp-ov-conn-source'],
+                    customUrl: ['scp-sp-ov-custom-url'],
+                    customKey: ['scp-sp-ov-custom-key'],
+                    customModel: ['scp-sp-ov-custom-model'],
                     connectionProfileId: ['scp-sp-ov-conn-profile'],
                     includeSystemPrompt: ['scp-sp-ov-include-sysprompt'],
                     includeUserPersonality: ['scp-sp-ov-include-persona'],
+                    includeAlternateSwipes: ['scp-sp-ov-include-alt-swipes'],
                     applyRegexToContext: ['scp-sp-ov-apply-regex'],
                     charField_tags: ['scp-sp-ov-ce-tags'],
                     charField_description: ['scp-sp-ov-ce-description'],
@@ -13326,6 +15726,8 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                         el.value = eff.connectionSource ?? 'default';
                         const pg = document.getElementById('scp-sp-ov-profile-group');
                         if (pg) pg.style.display = el.value === 'profile' ? '' : 'none';
+                        const cg = document.getElementById('scp-sp-ov-custom-profile-group');
+                        if (cg) cg.style.display = el.value === 'custom' ? '' : 'none';
                     }
                     else if (id === 'scp-sp-ov-conn-profile') {
                         el.value = eff.connectionProfileId ?? '';
@@ -13385,36 +15787,35 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         window.addEventListener('resize', () => {
             if (windowEl && windowEl.style.display !== 'none') {
                 const r = windowEl.getBoundingClientRect();
-                let changed = false;
-                let newX = r.left, newY = r.top;
+                const s = getSettings();
                 
-                if (r.right > window.innerWidth) { newX = Math.max(0, window.innerWidth - r.width); changed = true; }
-                if (r.bottom > window.innerHeight && r.top > 50) { newY = Math.max(0, window.innerHeight - r.height); changed = true; }
-                
-                if (changed) {
-                    windowEl.style.left = `${newX}px`; windowEl.style.top = `${newY}px`;
-                    const s = getSettings();
-                    s.windowX = newX; s.windowY = newY;
-                    saveSettings();
+                if (s.windowX !== null && s.windowY !== null) {
+                    const maxLeft = Math.max(0, window.innerWidth - r.width);
+                    const maxTop = Math.max(0, window.innerHeight - r.height);
+                    windowEl.style.left = `${Math.max(0, Math.min(s.windowX, maxLeft))}px`;
+                    windowEl.style.top = `${Math.max(0, Math.min(s.windowY, maxTop))}px`;
                 }
             }
             
             if (iconEl && iconEl.style.display !== 'none') {
-                const vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
-                const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+                const vw = window.innerWidth;
+                const vh = window.innerHeight;
                 const iconSize = 46;
-                let curLeft = parseFloat(iconEl.style.left);
-                let curTop = parseFloat(iconEl.style.top);
+                const savedIconPos = localStorage.getItem(ICON_STORAGE_KEY);
                 
-                if (!isNaN(curLeft) && !isNaN(curTop)) {
-                    let newLeft = Math.max(0, Math.min(curLeft, vw - iconSize));
-                    let newTop = Math.max(0, Math.min(curTop, vh - iconSize));
-                    
-                    if (newLeft !== curLeft || newTop !== curTop) {
-                        iconEl.style.left = `${newLeft}px`;
-                        iconEl.style.top = `${newTop}px`;
-                        localStorage.setItem(ICON_STORAGE_KEY, JSON.stringify({ left: `${newLeft}px`, top: `${newTop}px` }));
-                    }
+                if (savedIconPos) {
+                    try {
+                        const pos = JSON.parse(savedIconPos);
+                        const left = parseFloat(pos.left);
+                        const top = parseFloat(pos.top);
+                        
+                        if (!isNaN(left) && !isNaN(top)) {
+                            let newLeft = Math.max(0, Math.min(left, vw - iconSize));
+                            let newTop = Math.max(0, Math.min(top, vh - iconSize));
+                            iconEl.style.left = `${newLeft}px`;
+                            iconEl.style.top = `${newTop}px`;
+                        }
+                    } catch(e) {}
                 }
             }
         });
@@ -13615,16 +16016,34 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             tab.addEventListener('click', () => {
                 document.querySelectorAll('.scp-modal-tab').forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
-                $('scp-ctx-formatted').style.display = tab.dataset.tab === 'formatted' ? '' : 'none';
-                $('scp-ctx-json').style.display = tab.dataset.tab === 'json' ? '' : 'none';
+                
+                const isFormatted = tab.dataset.tab === 'formatted';
+                const isJson = tab.dataset.tab === 'json';
+                
+                const fmtEl = $('scp-ctx-formatted');
+                const jsonEl = $('scp-ctx-json');
+                
+                if (fmtEl) fmtEl.style.display = isFormatted ? '' : 'none';
+                if (jsonEl) jsonEl.style.display = isJson ? '' : 'none';
+                
+                setTimeout(() => {
+                    const targetEl = isJson ? jsonEl : document.getElementById('scp-ctx-body');
+                    if (targetEl) {
+                        const prevBehavior = targetEl.style.scrollBehavior;
+                        targetEl.style.scrollBehavior = 'auto';
+                        targetEl.scrollTop = targetEl.scrollHeight;
+                        targetEl.style.scrollBehavior = prevBehavior;
+                    }
+                }, 0);
             });
         });
         $('scp-ctx-copy-btn')?.addEventListener('click', () => {
             const activeTab = document.querySelector('.scp-modal-tab.active');
-            const text = activeTab?.dataset.tab === 'json'
-                ? $('scp-ctx-json')?.textContent || ''
-                : $('scp-ctx-formatted')?.textContent || '';
-            copyText(text);
+            if (activeTab?.dataset.tab === 'json') {
+                copyText($('scp-ctx-json')?.textContent || '');
+            } else {
+                copyText(formatPayloadAsText(_lastInspectorMessages));
+            }
         });
     }
 
@@ -13774,7 +16193,6 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         const session = getCurrentSession();
         const starred = session.messages.filter(m => starredIds.includes(m.id));
 
-        // Clear dynamic items
         listEl.querySelectorAll('.scp-fav-item').forEach(el => el.remove());
 
         if (!starred.length) {
@@ -13862,7 +16280,10 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         return new Promise((res, rej) => {
             const r = new FileReader();
             r.onload = () => res(r.result);
-            r.onerror = () => rej(new Error('Read failed'));
+            r.onerror = () => {
+                _dbgAdd('ATTACHMENT_READ_FAILED', { error: 'FileReader failed' });
+                rej(new Error('Read failed'));
+            };
             r.readAsDataURL(file);
         });
     }
@@ -13903,6 +16324,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 } else {
                     let cap = await _getCaptionViaExtension(a.file).catch((e)=>{
                         console.warn("[ST-Copilot] Captioning error:", e);
+                        _dbgAdd('IMAGE_CAPTIONING_SERVICE_MISSING', { name: a.name });
                         return '';
                     });
                     if (!cap) toastr.warning(`Captioning failed for ${a.name}`, EXT_DISPLAY);
@@ -13992,6 +16414,9 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             removeBtn.title = 'Remove';
             removeBtn.addEventListener('click', e => {
                 e.stopPropagation();
+
+                _dbgAdd('ATTACHMENT_REMOVE', { id: att.id });
+
                 _pendingAttachments = _pendingAttachments.filter(a => a.id !== att.id);
                 _renderAttachmentPreviews();
                 updateMsgCount(getCurrentSession());
@@ -14006,6 +16431,8 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
     let _lightboxOrigin = { x: 0.5, y: 0.5 };
 
     function _openImageLightbox(att) {
+        _dbgAdd('ATTACHMENT_LIGHTBOX_OPEN', { isImage: true });
+
         if (_lightboxEl) _lightboxEl.remove();
         _lightboxScale = 1;
 
@@ -14041,6 +16468,8 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
     }
 
     async function _openTextLightbox(att) {
+        _dbgAdd('ATTACHMENT_LIGHTBOX_OPEN', { isImage: false });
+
         if (_lightboxEl) _lightboxEl.remove();
         const overlay = document.createElement('div');
         overlay.className = 'scp-lightbox';
@@ -14075,6 +16504,8 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                 name: file.name, type: file.type, mimeType: file.type,
                 dataUrl, isImage, file, textContent: null,
             });
+
+            _dbgAdd('ATTACHMENT_ADD', { name: file.name, type: file.type, size: file.size });
         }
         _renderAttachmentPreviews();
         updateMsgCount(getCurrentSession());
@@ -14095,7 +16526,6 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
             extVersion = CHANGELOG[0]?.version || '?';
         }
     }
-
 
     async function init() {
         _dbgSetupGlobalErrorHandlers();
@@ -14132,7 +16562,23 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         if (es) {
             es.on(et.CHAT_CHANGED || 'chat_changed', onChatChanged);
             es.on(et.CHARACTER_SELECTED || 'character_selected', onChatChanged);
-            es.on(et.APP_READY || 'app_ready', updateProfilesList);
+            es.on(et.APP_READY || 'app_ready', () => {
+                updateProfilesList();
+                updateSPConnProfileList();
+            });
+
+            const cmEvents = [
+                et.CONNECTION_PROFILE_CREATED || 'connection_profile_created',
+                et.CONNECTION_PROFILE_UPDATED || 'connection_profile_updated',
+                et.CONNECTION_PROFILE_DELETED || 'connection_profile_deleted',
+                et.CONNECTION_PROFILE_LOADED || 'connection_profile_loaded'
+            ];
+            cmEvents.forEach(evt => {
+                es.on(evt, () => {
+                    updateProfilesList();
+                    updateSPConnProfileList();
+                });
+            });
             
             const dynEvents =[
                 et.MESSAGE_RECEIVED || 'message_received',
@@ -14151,6 +16597,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
         checkChangelogAutoShow();
         _takeProfileSnapshot();
         _dbgSnapshotSettings();
+        updateMemoryDot();
 
         window.addEventListener('message', e => {
             if (!e.data || typeof e.data !== 'object') return;
