@@ -4847,3 +4847,69 @@ details.scp-cl-entry[open] .scp-cl-entry-summary::before { transform: rotate(90d
 .scp-ctx-hl-macro { color:#ffd670; }
 .scp-ctx-hl-header { color:var(--scp-accent); font-weight:600; }
 .scp-ctx-anchor { display:block; position:relative; top:-8px; }
+
+/* ── Mobile Settings Tabs Fix (3x2 grid) ── */
+@media screen and (max-width: 600px) {
+    /* Ограничиваем высоту панели, чтобы она точно не вылезала за края экрана */
+    .scp-settings-panel {
+        height: 90dvh !important;
+        max-height: calc(100vh - 40px) !important; /* Фолбэк для старых браузеров */
+    }
+
+    /* Разбиваем саму шапку на 2 строки */
+    .scp-sp-header {
+        display: grid !important;
+        grid-template-columns: 1fr auto !important;
+        grid-template-rows: auto auto !important;
+        gap: 12px 8px !important;
+        padding: 12px 14px !important;
+        height: auto !important;
+    }
+    
+    /* Название в верхний левый угол */
+    .scp-sp-header-left {
+        grid-column: 1 !important;
+        grid-row: 1 !important;
+        flex: unset !important;
+    }
+    
+    /* Кнопка закрытия в верхний правый угол */
+    .scp-sp-header-right {
+        grid-column: 2 !important;
+        grid-row: 1 !important;
+        flex: unset !important;
+        justify-self: end !important;
+    }
+
+    /* Блок с вкладками переносим на 2-ю строку во всю ширину */
+    .scp-sp-tabs {
+        grid-column: 1 / -1 !important;
+        grid-row: 2 !important;
+        display: grid !important;
+        grid-template-columns: repeat(3, 1fr) !important;
+        gap: 4px !important;
+        white-space: normal !important;
+        overflow: hidden !important;
+        padding: 4px !important;
+    }
+    
+    /* Дизайн кнопок-вкладок */
+    .scp-sp-tab {
+        padding: 6px 2px !important;
+        font-size: 10.5px !important;
+        white-space: normal !important;
+        line-height: 1.15 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        text-align: center !important;
+        flex: unset !important;
+        min-height: 32px !important;
+    }
+    
+    .scp-sp-override-dot, 
+    .scp-sp-memory-dot {
+        top: 2px !important;
+        right: 2px !important;
+    }
+}

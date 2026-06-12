@@ -180,8 +180,7 @@
         }
     }
 
-    const DEFAULT_SYSTEM_PROMPT = `<system_prompt>
-<system_role>
+    const DEFAULT_SYSTEM_PROMPT = `<system_role>
 Identify as "ST-Copilot", a meta-analytical engine and creative strategist for SillyTavern.
 - Human: The person operating the interface. Direct your OOC insights to them.
 - {{user}}: The in-universe player avatar.
@@ -204,8 +203,7 @@ When the user asks you a question or requests assistance, adhere to the followin
 3. Formatting: Use markdown (bullet points, bold text, etc.) to make your insights readable and engaging.
 </operational_guidelines>
 
-Your ultimate goal is to enhance the user's roleplay experience by providing deep OOC insights, tracking lore, and answering questions based on your specific persona configuration.
-</system_prompt>`;
+Your ultimate goal is to enhance the user's roleplay experience by providing deep OOC insights, tracking lore, and answering questions based on your specific persona configuration.`;
 
     const DEFAULT_LB_MANAGE_PROMPT = `<context>
 A Lorebook (or World Info) is a dynamic memory system used in roleplay to store and seamlessly retrieve facts about the world, characters, locations, items, and lore. When specific keywords (\`triggers\`) are mentioned in the chat, the system secretly injects the corresponding \`content\` into the AI's prompt.
@@ -410,8 +408,7 @@ replacement text
 ]}
 \`\`\``;
 
-    const DEFAULT_MEMORY_PROMPT = `<memory_system>
-<memory_logic>
+    const DEFAULT_MEMORY_PROMPT = `<memory_logic>
 Purpose: ADMINISTRATIVE META-MEMORY. This is a non-diegetic (OOC) database for ST-Copilot to track the Human operator's technical requirements, cognitive patterns, and workflow constraints. 
 
 CRITICAL ARCHITECTURAL BOUNDARY: 
@@ -437,12 +434,10 @@ Every entry MUST start with the exact word "Human".
 
 # Format: 
 {{memory_format}}
-</output_requirement>
-</memory_system>`;
+</output_requirement>`;
     const MEMORY_FORMAT_BLOCK = `\`\`\`memory-update\n[\n  {"action":"add","scope":"global|character|chat|session","key":"CategoryName","value":"Fact to remember"},\n  {"action":"edit","scope":"exact_existing_scope","key":"exact_existing_key","value":"Updated fact"},\n  {"action":"delete","scope":"exact_existing_scope","key":"exact_existing_key"}\n]\n\`\`\``;
 
-    const DEFAULT_TOOLS_PROMPT = `<tool_calls_system>
-Imperative: NEVER hallucinate missing context. If chat history, specific lore, or data appears absent, DO NOT assume the chat hasn't started or the data doesn't exist. You MUST proactively use your tools to fetch, verify, and retrieve the actual state before answering.
+    const DEFAULT_TOOLS_PROMPT = `Imperative: NEVER hallucinate missing context. If chat history, specific lore, or data appears absent, DO NOT assume the chat hasn't started or the data doesn't exist. You MUST proactively use your tools to fetch, verify, and retrieve the actual state before answering.
 
 Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response to the Human. You may chain tools sequentially.
 
@@ -452,8 +447,7 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
 
 <output_format>
 {{tool_call_format}}.
-</output_format>
-</tool_calls_system>`;
+</output_format>`;
     const TOOL_CALL_FORMAT_BLOCK = `\`\`\`tool_call\n{"name": "tool_name","input": {"parameter_name": "value"}}\n\`\`\``;
 
     // ─── Changelog Data ──────────────────────────────────────────────────────────
@@ -474,7 +468,7 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
     {
         version: '2.7.2',
         date: '5/29/2026',
-        announce: true,
+        announce: false,
         notes: [
             '<strong>Shortcuts Overlay</strong> — Introduced a dedicated "Shortcuts" configuration window in the settings panel.',
             '<strong>Context-Aware Search</strong> — Refined the search shortcut to trigger exclusively when the Copilot window is active.',
@@ -485,7 +479,7 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
     {
         version: '2.7.1',
         date: '5/28/2026',
-        announce: true,
+        announce: false,
         notes: [
             '<strong>Character Tagging</strong> — Added the ability to modify the "tags" field for already existing characters.',
             '<strong>Low Performance Mode</strong> — Introduced a new toggle to optimize resource usage on lower-end hardware.',
@@ -1370,8 +1364,13 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
 
         // Aspect: Evolutia
         if (getSettings().useAspectEvolutia) {
-            const aeDesc = _getAspectEvolutiaCharDescription();
-            if (aeDesc) simple.description = aeDesc;
+            const aeFields = _getAspectEvolutiaCharFields();
+            if (aeFields && aeFields.length) {
+                delete simple.description;
+                aeFields.forEach(f => {
+                    parts.push(`<evolutia_char_field name="${escHtml(f.name)}">\n${f.content}\n</evolutia_char_field>`);
+                });
+            }
         }
 
         for (const [key, val] of Object.entries(simple)) {
@@ -1403,11 +1402,28 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
             fieldsList.push('user_persona');
         }
         const enabledFields = fieldsList.join(', ') || 'all fields';
+        
+        const aeCharFields = settings.useAspectEvolutia ? _getAspectEvolutiaCharFields() : null;
+        const aeUserFields = settings.useAspectEvolutia && settings.includeUserPersonality ? _getAspectEvolutiaPersonaFields() : null;
+        
+        let evolutiaDocs = '';
+        if (aeCharFields || aeUserFields) {
+            evolutiaDocs = `\n\n<aspect_evolutia_integration>\nDynamic fields are currently managing descriptions. To edit them, target their specific virtual names.\n`;
+            if (aeCharFields && aeCharFields.length) {
+                evolutiaDocs += `Character Aspect Fields:\n` + aeCharFields.map(f => `- Field: "evolutia_char:${f.name}"`).join('\n') + `\n`;
+            }
+            if (aeUserFields && aeUserFields.length) {
+                evolutiaDocs += `User Aspect Fields:\n` + aeUserFields.map(f => `- Field: "evolutia_user:${f.name}"`).join('\n') + `\n`;
+            }
+            evolutiaDocs += `Example: <replace field="evolutia_char:FieldName">...</replace>\n</aspect_evolutia_integration>`;
+        }
+        
         const base = (settings.charEditPrompt || DEFAULT_CHAR_EDIT_DIRECTIVE.trim())
             .replace('{{char_edit_fields}}', enabledFields)
             .replace('{{char_edit_format}}', CHAR_EDIT_FORMAT_BLOCK)
             .replace('{{char_create_format}}', CHAR_CREATE_FORMAT_BLOCK);
-        return `<character_management>\n${base}\n</character_management>`;
+            
+        return _ensureWrapped(`${base}${evolutiaDocs}`, 'character_management');
     }
 
     function buildChatEditAIInstructions(settings) {
@@ -1794,6 +1810,19 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
         if (fieldId === 'user_persona') return getUserPersona();
         if (fieldId === 'tags') return getTagsForCharacter(char).join(', ');
         
+        if (fieldId.startsWith('evolutia_char:')) {
+            const aeName = fieldId.split('evolutia_char:')[1];
+            const fields = _getAspectEvolutiaCharFields();
+            const f = fields?.find(x => String(x.name).trim().toLowerCase() === String(aeName).trim().toLowerCase());
+            return f ? f.content : '';
+        }
+        if (fieldId.startsWith('evolutia_user:')) {
+            const aeName = fieldId.split('evolutia_user:')[1];
+            const fields = _getAspectEvolutiaPersonaFields();
+            const f = fields?.find(x => String(x.name).trim().toLowerCase() === String(aeName).trim().toLowerCase());
+            return f ? f.content : '';
+        }
+        
         const d = char.data || {};
         if (fieldId === 'authors_note') return getAuthorsNote();
         if (fieldId === 'alternate_greetings') return d.alternate_greetings || [];
@@ -1802,6 +1831,69 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
 
     async function saveCharacterField(char, fieldId, newValue) {
         const ctx = SillyTavern.getContext();
+        
+        if (fieldId.startsWith('evolutia_char:')) {
+            const aeName = fieldId.split('evolutia_char:')[1];
+            const AE_KEY = 'st-description-swap-fields';
+            if (!char.data.extensions) char.data.extensions = {};
+            const state = char.data.extensions[AE_KEY];
+            if (!state) throw new Error('Evolutia state missing');
+            const activeId = state.activeAlterEgoId || 'base';
+            const alterEgos = Array.isArray(state.alterEgos) ? state.alterEgos : [];
+            const activeEgo = alterEgos.find(a => a.id === activeId) || alterEgos[0];
+            const fields = Array.isArray(activeEgo?.fields) ? activeEgo.fields : (Array.isArray(state.fields) ? state.fields : []);
+            const f = fields.find(x => String(x.name).trim().toLowerCase() === String(aeName).trim().toLowerCase());
+            if (!f) throw new Error(`Aspect field "${aeName}" not found`);
+            
+            f.content = newValue;
+            
+            const payload = {
+                avatar_url: char.avatar,
+                ch_name: char.name || 'Unknown',
+                field: 'extensions',
+                value: char.data.extensions
+            };
+            await fetch('/api/characters/edit-attribute', {
+                method: 'POST',
+                headers: { ...ctx.getRequestHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            const es = ctx.eventSource || window.eventSource;
+            const et = ctx.event_types || window.event_types;
+            if (es && et?.CHARACTER_EDITED) {
+                es.emit(et.CHARACTER_EDITED, { detail: { id: ctx.characterId, character: char } });
+                es.emit(et.CHARACTER_EDITED, { id: ctx.characterId, character: char });
+            }
+            return;
+        }
+
+        if (fieldId.startsWith('evolutia_user:')) {
+            const aeName = fieldId.split('evolutia_user:')[1];
+            const pu = window.power_user || ctx.powerUserSettings || {};
+            let personaId = window.user_avatar || ctx.user_avatar || ctx.userAvatar || ctx.personaId || ctx.activePersonaId || ctx.active_persona_id;
+            if (!personaId && typeof document !== 'undefined') {
+                const selected = document.querySelector('#user_avatar_block .avatar-container.selected, #persona_container .avatar-container.selected, .persona_selected');
+                if (selected) personaId = selected.getAttribute('data-avatar-id') || selected.dataset?.avatarId;
+            }
+            if (typeof personaId === 'object' && personaId !== null) personaId = personaId.avatarId || personaId.avatar_id || personaId.user_avatar || personaId.userAvatar || personaId.id;
+            
+            const AE_KEY = 'st-description-swap-fields';
+            const personaState = pu[AE_KEY]?.personaDynamicFields?.[personaId];
+            if (!personaState) throw new Error('Evolutia persona state missing');
+            const activeId = personaState.activeAlterEgoId || 'base';
+            const alterEgos = Array.isArray(personaState.alterEgos) ? personaState.alterEgos : [];
+            const activeEgo = alterEgos.find(a => a.id === activeId) || alterEgos[0];
+            const fields = Array.isArray(activeEgo?.fields) ? activeEgo.fields : (Array.isArray(personaState.fields) ? personaState.fields : []);
+            const f = fields.find(x => String(x.name).trim().toLowerCase() === String(aeName).trim().toLowerCase());
+            if (!f) throw new Error(`Aspect persona field "${aeName}" not found`);
+            
+            f.content = newValue;
+            
+            if (typeof ctx.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
+            else if (typeof window.saveSettingsDebounced === 'function') window.saveSettingsDebounced();
+            return;
+        }
         
         if (fieldId === 'user_persona') {
             const pu = window.power_user || ctx.powerUserSettings || {};
@@ -2045,14 +2137,20 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
     function logCharEditHistory(changes, statusStr, afterMsgId = null) {
         if (!changes?.length) return;
         try {
-            const FIELD_LABELS = { tags:'Tags', description:'Description', personality:'Personality', scenario:'Scenario', first_mes:'First Message', mes_example:'Example Dialogue', authors_note:"Author's Note", user_persona:"User Persona", alternate_greetings:'Alternate Greetings' };
+            const getFieldLabel = (f) => {
+                const LBLS = { tags:'Tags', description:'Description', personality:'Personality', scenario:'Scenario', first_mes:'First Message', mes_example:'Example Dialogue', authors_note:"Author's Note", user_persona:"User Persona", alternate_greetings:'Alternate Greetings' };
+                if (LBLS[f]) return LBLS[f];
+                if (f && f.startsWith('evolutia_char:')) return `Aspect (Char): ${f.split('evolutia_char:')[1]}`;
+                if (f && f.startsWith('evolutia_user:')) return `Aspect (User): ${f.split('evolutia_user:')[1]}`;
+                return f || '?';
+            };
             const session = getCurrentSession();
             const icon = statusStr === 'Applied' ? '✓' : (statusStr === 'Rejected' ? '✕' : '·');
             const actionText = statusStr === 'Applied' ? 'ACCEPTED' : (statusStr === 'Rejected' ? 'REJECTED' : 'DISMISSED (ignored)');
             
             const newLines = changes.map(c => {
                 const patches = c.patches ? ` (${c.patches.length} patch${c.patches.length !== 1 ? 'es' : ''})` : '';
-                return `${icon} **${actionText}**: \`${escHtml(FIELD_LABELS[c.field] || c.field || '?')}\` — ${escHtml(c.action || '?')}${c.index ? ` #${c.index}` : ''}${patches}`;
+                return `${icon} **${actionText}**: \`${escHtml(getFieldLabel(c.field))}\` — ${escHtml(c.action || '?')}${c.index ? ` #${c.index}` : ''}${patches}`;
             });
 
             if (afterMsgId && addHistoryToSwipe(afterMsgId, newLines)) return;
@@ -2344,7 +2442,13 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
         const editableChanges = changes.map(c => JSON.parse(JSON.stringify(c)));
         const itemStates = editableChanges.map(() => 'pending');
 
-        const FIELD_LABELS = { description:'Description', personality:'Personality', scenario:'Scenario', first_mes:'First Message', mes_example:'Example Dialogue', authors_note:"Author's Note", user_persona:"User Persona", alternate_greetings:'Alternate Greetings' };
+        const getFieldLabel = (f) => {
+            const LBLS = { description:'Description', personality:'Personality', scenario:'Scenario', first_mes:'First Message', mes_example:'Example Dialogue', authors_note:"Author's Note", user_persona:"User Persona", alternate_greetings:'Alternate Greetings' };
+            if (LBLS[f]) return LBLS[f];
+            if (f && f.startsWith('evolutia_char:')) return `Aspect (Char): ${f.split('evolutia_char:')[1]}`;
+            if (f && f.startsWith('evolutia_user:')) return `Aspect (User): ${f.split('evolutia_user:')[1]}`;
+            return f || '?';
+        };
 
         const card = document.createElement('div');
         card.className = 'scp-lb-proposal-card scp-char-proposal-card';
@@ -2446,7 +2550,7 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
                 : c.action === 'prepend' ? '⬆ Prepend'
                 : c.action === 'append_text' ? '⬇ Append'
                 : `✎ Replace${patchCount}`;
-            meta.innerHTML = `<span class="scp-lb-proposal-action">${escHtml(actionLabel)}</span><span class="scp-lb-proposal-name">${escHtml(FIELD_LABELS[c.field]||c.field||'?')}${c.index?` #${c.index}`:''}</span>`;
+            meta.innerHTML = `<span class="scp-lb-proposal-action">${escHtml(actionLabel)}</span><span class="scp-lb-proposal-name">${escHtml(getFieldLabel(c.field))}${c.index?` #${c.index}`:''}</span>`;
 
             const btns = document.createElement('div');
             btns.className = 'scp-lb-proposal-item-btns';
@@ -2465,7 +2569,7 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
                         original = String(getCharFieldValue(char, change.field));
                     }
                     const result = getAppliedResult(change);
-                    const title = `Diff: ${FIELD_LABELS[c.field]||c.field}${c.index?` #${c.index}`:''}`;
+                    const title = `Diff: ${getFieldLabel(c.field)}${c.index?` #${c.index}`:''}`;
                     openTextDiffModal(title, original, result);
                 });
                 btns.appendChild(diffBtn);
@@ -4519,6 +4623,18 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
             
         return `\n\n<persistent_memory>\nThese are facts about the user that you should remember and reference when relevant:\n${lines}\n</persistent_memory>`;
     }
+    function _ensureWrapped(text, tag) {
+        if (!text || !text.trim()) return '';
+        let t = text.trim();
+        const open = `<${tag}>`;
+        const close = `</${tag}>`;
+        
+        t = t.replace(new RegExp(`^<${tag}>\\s*`, 'i'), '');
+        t = t.replace(new RegExp(`\\s*</${tag}>$`, 'i'), '');
+        
+        return `${open}\n${t}\n${close}`;
+    }
+
     function buildMemoryAIInstructions() {
         const s = getSettings();
         if (!s.memoryEnabled) return '';
@@ -4537,9 +4653,11 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
                 .join('\n');
         }
         
-        return '\n\n' + rawPrompt
+        const finalPrompt = rawPrompt
             .replace('{{memory_format}}', MEMORY_FORMAT_BLOCK)
             .replace('{{current_memories}}', memsText);
+            
+        return '\n\n' + _ensureWrapped(finalPrompt, 'memory_system');
     }
 
     function parseMemoryBlockFromText(text) {
@@ -5432,9 +5550,12 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
         if (!prompt.includes('{{tool_call_format}}')) {
             prompt = prompt.replace('Format requirement:', 'Format requirement:\n{{tool_call_format}}');
         }
-        return '\n\n' + prompt
+        
+        const finalPrompt = prompt
             .replace('{{tools_list}}', toolsList)
             .replace('{{tool_call_format}}', TOOL_CALL_FORMAT_BLOCK);
+            
+        return '\n\n' + _ensureWrapped(finalPrompt, 'tool_calls_system');
     }
 
     async function executeAskUser(input, msgEl) {
@@ -7802,12 +7923,6 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
 
     function getUserPersona() {
         const ctx = SillyTavern.getContext();
-
-        // Aspect: Evolutia — use active persona alter ego fields if available
-        if (getSettings().useAspectEvolutia) {
-            const aePersona = _getAspectEvolutiaPersonaDescription();
-            if (aePersona) return aePersona;
-        }
         
         try {
             let expanded = '';
@@ -8020,11 +8135,10 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
         return null;
     }
 
-    function _getAspectEvolutiaCharDescription() {
+    function _getAspectEvolutiaCharFields() {
         try {
             const ctx = SillyTavern.getContext();
-            const charId = ctx.characterId;
-            const char = ctx.characters?.[charId];
+            const char = ctx.characters?.[ctx.characterId];
             if (!char) return null;
             const AE_KEY = 'st-description-swap-fields';
             const state = char.data?.extensions?.[AE_KEY];
@@ -8035,25 +8149,20 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
             const fields = Array.isArray(activeEgo?.fields) ? activeEgo.fields : (Array.isArray(state.fields) ? state.fields : []);
             const enabled = fields.filter(f => f.enabled !== false && f.content?.trim());
             if (!enabled.length) return null;
-            const charName = char.name || char.data?.name || 'Character';
-            const parts = enabled.map(f => `[DEFINITION: ${f.name?.trim() || 'Field'}]\n${f.content.trim()}\n[END DEFINITION: ${f.name?.trim() || 'Field'}]`);
-            return `[CHARACTER DEFINITIONS]\nThese definitions apply only to ${charName}.\n\n${parts.join('\n\n')}\n\n[END CHARACTER DEFINITIONS]`;
+            return enabled.map(f => ({ id: f.id, name: f.name || 'Field', content: f.content }));
         } catch(_) { return null; }
     }
 
-    function _getAspectEvolutiaPersonaDescription() {
+    function _getAspectEvolutiaPersonaFields() {
         try {
             const ctx = SillyTavern.getContext();
             const pu = window.power_user || ctx.powerUserSettings || {};
-            
             let personaId = window.user_avatar || ctx.user_avatar || ctx.userAvatar || ctx.personaId || ctx.activePersonaId || ctx.active_persona_id;
             if (!personaId && typeof document !== 'undefined') {
                 const selected = document.querySelector('#user_avatar_block .avatar-container.selected, #persona_container .avatar-container.selected, .persona_selected');
                 if (selected) personaId = selected.getAttribute('data-avatar-id') || selected.dataset?.avatarId;
             }
-            if (typeof personaId === 'object' && personaId !== null) {
-                personaId = personaId.avatarId || personaId.avatar_id || personaId.user_avatar || personaId.userAvatar || personaId.id;
-            }
+            if (typeof personaId === 'object' && personaId !== null) personaId = personaId.avatarId || personaId.avatar_id || personaId.user_avatar || personaId.userAvatar || personaId.id;
             if (!personaId) return null;
 
             const AE_KEY = 'st-description-swap-fields';
@@ -8066,19 +8175,15 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
             const fields = Array.isArray(activeEgo?.fields) ? activeEgo.fields : (Array.isArray(personaState.fields) ? personaState.fields : []);
             const enabled = fields.filter(f => f.enabled !== false && f.content?.trim());
             if (!enabled.length) return null;
-            
-            let personaName = ctx.name1 || 'User';
-            if (pu.personas && typeof pu.personas[personaId] === 'string') {
-                personaName = pu.personas[personaId];
-            }
-            
-            const parts = enabled.map(f => `[DEFINITION: ${f.name?.trim() || 'Field'}]\n${f.content.trim()}\n[END DEFINITION: ${f.name?.trim() || 'Field'}]`);
-            return `[USER PERSONA DEFINITIONS]\nThese definitions apply only to ${personaName}.\n\n${parts.join('\n\n')}\n\n[END USER PERSONA DEFINITIONS]`;
+            return enabled.map(f => ({ id: f.id, name: f.name || 'Field', content: f.content }));
         } catch(e) { return null; }
     }
 
-async function buildSystemContent(settings) {
-        const parts = [(typeof settings.systemPrompt === 'string' && settings.systemPrompt.trim()) ? settings.systemPrompt : DEFAULT_SYSTEM_PROMPT];
+    
+
+    async function buildSystemContent(settings) {
+        let sysPromptRaw = (typeof settings.systemPrompt === 'string' && settings.systemPrompt.trim()) ? settings.systemPrompt : DEFAULT_SYSTEM_PROMPT;
+        const parts = [_ensureWrapped(sysPromptRaw, 'system_prompt')];
         const charInfo = getCharInfo();
         const ctx = SillyTavern.getContext();
 
@@ -8115,8 +8220,23 @@ async function buildSystemContent(settings) {
 
         {
             const userName = ctx.name1 || 'User';
-            const personaContent = settings.includeUserPersonality ? getUserPersona() : '';
-            const inner = personaContent ? `Name: ${userName}\n${personaContent}` : `Name: ${userName}`;
+            let inner = `Name: ${userName}`;
+            
+            if (settings.includeUserPersonality) {
+                let hasEvolutia = false;
+                if (settings.useAspectEvolutia) {
+                    const aeUserFields = _getAspectEvolutiaPersonaFields();
+                    if (aeUserFields && aeUserFields.length) {
+                        const aeContent = aeUserFields.map(f => `<evolutia_user_field name="${escHtml(f.name)}">\n${f.content}\n</evolutia_user_field>`).join('\n\n');
+                        inner += `\n${aeContent}`;
+                        hasEvolutia = true;
+                    }
+                }
+                if (!hasEvolutia) {
+                    const personaContent = getUserPersona();
+                    if (personaContent) inner += `\n${personaContent}`;
+                }
+            }
             parts.push(`\n\n<{{user}}_persona>\n${inner}\n</{{user}}_persona>`);
         }
 
