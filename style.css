@@ -4850,13 +4850,11 @@ details.scp-cl-entry[open] .scp-cl-entry-summary::before { transform: rotate(90d
 
 /* ── Mobile Settings Tabs Fix (3x2 grid) ── */
 @media screen and (max-width: 600px) {
-    /* Ограничиваем высоту панели, чтобы она точно не вылезала за края экрана */
     .scp-settings-panel {
         height: 90dvh !important;
-        max-height: calc(100vh - 40px) !important; /* Фолбэк для старых браузеров */
+        max-height: calc(100vh - 40px) !important;
     }
 
-    /* Разбиваем саму шапку на 2 строки */
     .scp-sp-header {
         display: grid !important;
         grid-template-columns: 1fr auto !important;
@@ -4866,14 +4864,12 @@ details.scp-cl-entry[open] .scp-cl-entry-summary::before { transform: rotate(90d
         height: auto !important;
     }
     
-    /* Название в верхний левый угол */
     .scp-sp-header-left {
         grid-column: 1 !important;
         grid-row: 1 !important;
         flex: unset !important;
     }
     
-    /* Кнопка закрытия в верхний правый угол */
     .scp-sp-header-right {
         grid-column: 2 !important;
         grid-row: 1 !important;
@@ -4881,7 +4877,6 @@ details.scp-cl-entry[open] .scp-cl-entry-summary::before { transform: rotate(90d
         justify-self: end !important;
     }
 
-    /* Блок с вкладками переносим на 2-ю строку во всю ширину */
     .scp-sp-tabs {
         grid-column: 1 / -1 !important;
         grid-row: 2 !important;
@@ -4893,7 +4888,6 @@ details.scp-cl-entry[open] .scp-cl-entry-summary::before { transform: rotate(90d
         padding: 4px !important;
     }
     
-    /* Дизайн кнопок-вкладок */
     .scp-sp-tab {
         padding: 6px 2px !important;
         font-size: 10.5px !important;
