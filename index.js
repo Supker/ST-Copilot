@@ -1842,22 +1842,37 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
             const alterEgos = Array.isArray(state.alterEgos) ? state.alterEgos : [];
             const activeEgo = alterEgos.find(a => a.id === activeId) || alterEgos[0];
             const fields = Array.isArray(activeEgo?.fields) ? activeEgo.fields : (Array.isArray(state.fields) ? state.fields : []);
-            const f = fields.find(x => String(x.name).trim().toLowerCase() === String(aeName).trim().toLowerCase());
+            
+            const f = fields.find(x => {
+                const rawName = String(x.name || '').trim().toLowerCase();
+                const rawId = String(x.id || '').trim().toLowerCase();
+                const searchTarget = String(aeName).trim().toLowerCase();
+                return rawName === searchTarget || rawId === searchTarget;
+            });
             if (!f) throw new Error(`Aspect field "${aeName}" not found`);
             
             f.content = newValue;
             
             const payload = {
-                avatar_url: char.avatar,
-                ch_name: char.name || 'Unknown',
-                field: 'extensions',
-                value: char.data.extensions
+                name: char.name,
+                avatar: char.avatar,
+                data: {
+                    extensions: {
+                        [AE_KEY]: state
+                    }
+                }
             };
-            await fetch('/api/characters/edit-attribute', {
+            
+            const res = await fetch('/api/characters/merge-attributes', {
                 method: 'POST',
                 headers: { ...ctx.getRequestHeaders(), 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+            
+            if (!res.ok) {
+                const errText = await res.text().catch(() => res.statusText);
+                throw new Error(`HTTP ${res.status}: ${errText}`);
+            }
             
             const es = ctx.eventSource || window.eventSource;
             const et = ctx.event_types || window.event_types;
@@ -1885,7 +1900,13 @@ Process: Output \`tool_call\` JSON block -> Receive result -> Finalize response 
             const alterEgos = Array.isArray(personaState.alterEgos) ? personaState.alterEgos : [];
             const activeEgo = alterEgos.find(a => a.id === activeId) || alterEgos[0];
             const fields = Array.isArray(activeEgo?.fields) ? activeEgo.fields : (Array.isArray(personaState.fields) ? personaState.fields : []);
-            const f = fields.find(x => String(x.name).trim().toLowerCase() === String(aeName).trim().toLowerCase());
+            
+            const f = fields.find(x => {
+                const rawName = String(x.name || '').trim().toLowerCase();
+                const rawId = String(x.id || '').trim().toLowerCase();
+                const searchTarget = String(aeName).trim().toLowerCase();
+                return rawName === searchTarget || rawId === searchTarget;
+            });
             if (!f) throw new Error(`Aspect persona field "${aeName}" not found`);
             
             f.content = newValue;

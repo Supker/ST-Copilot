@@ -4907,3 +4907,15 @@ details.scp-cl-entry[open] .scp-cl-entry-summary::before { transform: rotate(90d
         right: 2px !important;
     }
 }
+@media screen and (max-width: 600px) {
+    .scp-lb-panel {
+        height: 90dvh !important;
+        max-height: calc(100vh - 40px) !important;
+    }
+    
+    .scp-picker-box,
+    .scp-dialog-box {
+        max-height: calc(100vh - 40px) !important;
+        max-height: 90dvh !important;
+    }
+}
