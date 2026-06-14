@@ -1802,7 +1802,7 @@ export function showGenerationError(err) {
                 ${escHtml(errorSummary)}
             </div>
             <div style="font-size: 12px; margin-bottom: 8px; color: var(--scp-text-muted);">
-                Please copy the technical details below to report the issue:
+                Please copy the technical details below and download Debug Log (from settings) to report the issue:
             </div>
             <textarea style="width:100%; height:160px; background:rgba(0,0,0,0.4); color:var(--scp-text-muted); border:1px solid rgba(255,255,255,0.15); padding:8px; border-radius:6px; font-family:var(--scp-font-mono, monospace); resize:vertical; font-size:11px; white-space:pre; word-wrap:normal; overflow-x:auto;" readonly onclick="this.select()">${escHtml(fullError)}</textarea>
         `
