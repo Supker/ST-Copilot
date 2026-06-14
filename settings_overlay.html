@@ -1,12 +1,17 @@
 <div id="scp-settings-overlay" class="scp-settings-overlay" style="display:none">
   <div class="scp-settings-panel">
 
-    <div class="scp-sp-header">
-      <div class="scp-sp-header-left">
-        <span style="color:var(--scp-accent);display:flex">${I.gear}</span>
-        <span class="scp-sp-title">Settings</span>
+    <div class="scp-sp-header" style="flex-direction: column; align-items: stretch; gap: 8px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="scp-sp-header-left">
+          <span style="color:var(--scp-accent);display:flex">${I.gear}</span>
+          <span class="scp-sp-title">Settings</span>
+        </div>
+        <div class="scp-sp-header-right">
+          <button class="scp-hbtn scp-hbtn-close" id="scp-sp-close">${I.x}</button>
+        </div>
       </div>
-      <div class="scp-sp-tabs">
+      <div class="scp-sp-tabs" style="justify-content: center; width: 100%;">
         <button class="scp-sp-tab active" data-sptab="global">Global</button>
         <button class="scp-sp-tab" data-sptab="prompts">Quick Prompts</button>
         <button class="scp-sp-tab" data-sptab="session">
@@ -19,9 +24,6 @@
         </button>
         <button class="scp-sp-tab" data-sptab="tools">Tools</button>
         <button class="scp-sp-tab" data-sptab="stats">Stats</button>
-      </div>
-      <div class="scp-sp-header-right">
-        <button class="scp-hbtn scp-hbtn-close" id="scp-sp-close">${I.x}</button>
       </div>
     </div>
 

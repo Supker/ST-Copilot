@@ -125,6 +125,11 @@ A fully integrated, highly detailed theme editor.
 
 ## 📜 Changelog History
 
+### V2.8.1
+*   **World Info Outlets:** Added full support for the `{{outlet::name}}` macro syntax, enabling dynamic content injection directly from World Info entries.
+*   **UI/UX Refinement:** Optimized the layout of the settings menu by repositioning tab navigation buttons for a more intuitive user experience.
+*   **Bug Fixes:** Resolved several minor stability issues and addressed UI regressions found in the previous version.
+
 ### V2.8.0
 *   **Tools & Agency:** Copilot is now agentic! It can independently gather and process information to provide more accurate and context-aware responses.
 *   **Persistent Memory:** Introduced long-term memory that persists across sessions. You can scope memory to **Global**, **Character-specific**, **Chat-specific**, or **Session-only**.
