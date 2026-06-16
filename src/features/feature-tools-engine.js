@@ -59,17 +59,24 @@ export async function executeTool(toolName, toolInput) {
             }
             return { found: results.length, results, note: `Use 'index' values in chat-changes proposals. Total messages searched: ${Math.min(msgs.length - 1, toIdx) - Math.max(0, fromIdx) + 1}` };
         }
-        case 'search_lorebook': {
+        case 'search_lorebook_entry': {
             const activeBooks = getActiveLorebookNames();
             const query = (toolInput.query || '').toLowerCase();
             const targetBook = toolInput.book_name;
             const searchIn = toolInput.search_in || 'all';
+            const onlyConstant = !!toolInput.only_constant;
+            const onlyOutlet = !!toolInput.only_outlet;
             const results = [];
             for (const bookName of activeBooks) {
                 if (targetBook && !bookName.toLowerCase().includes(targetBook.toLowerCase())) continue;
                 const data = await fetchWorldInfoBook(bookName).catch(() => null);
                 if (!data) continue;
                 for (const entry of wiEntriesToArray(data)) {
+                    const outletField = (entry.outlet || entry.outlet_name || entry.outletName || entry.automation_id || entry.automationId || '').trim();
+                    const isOutletPos = String(entry.position) === '5' || String(entry.position).toLowerCase() === 'outlet';
+                    const isEntryOutlet = isOutletPos || outletField !== '';
+                    if (onlyConstant && !entry.constant) continue;
+                    if (onlyOutlet && !isEntryOutlet) continue;
                     let matched = false;
                     const name = (entry.comment || '').toLowerCase();
                     const keys = (entry.key || []).join(' ').toLowerCase();
@@ -84,7 +91,9 @@ export async function executeTool(toolName, toolInput) {
                         name: entry.comment || `Entry #${entry.uid}`,
                         keys: entry.key || [],
                         content_preview: (entry.content || '').slice(0, 200) + ((entry.content || '').length > 200 ? '...' : ''),
-                        constant: !!entry.constant,
+                        is_constant: !!entry.constant,
+                        is_outlet: isEntryOutlet,
+                        outlet_name: outletField || null,
                         disabled: !!entry.disable,
                     });
                     if (results.length >= 20) break;
@@ -92,6 +101,38 @@ export async function executeTool(toolName, toolInput) {
                 if (results.length >= 20) break;
             }
             return { found: results.length, results };
+        }
+        case 'get_lorebooks': {
+            const activeBooks = getActiveLorebookNames();
+            const includeEntries = !!toolInput.include_entries;
+            const specificBook = toolInput.book_name;
+            if (!includeEntries) {
+                return {
+                    lorebooks: activeBooks.map(name => ({ name: getDisplayName(name), internal_name: name })),
+                    total: activeBooks.length,
+                };
+            }
+            const booksToProcess = specificBook
+                ? activeBooks.filter(n => n === specificBook || getDisplayName(n) === specificBook)
+                : activeBooks;
+            const result = {};
+            for (const name of booksToProcess) {
+                const data = await fetchWorldInfoBook(name).catch(() => null);
+                if (!data) { result[getDisplayName(name)] = []; continue; }
+                result[getDisplayName(name)] = wiEntriesToArray(data).map(e => {
+                    const outletField = (e.outlet || e.outlet_name || e.outletName || e.automation_id || e.automationId || '').trim();
+                    const isOutletPos = String(e.position) === '5' || String(e.position).toLowerCase() === 'outlet';
+                    return {
+                        name: e.comment || `#${e.uid}`,
+                        uid: e.uid,
+                        is_constant: !!e.constant,
+                        is_outlet: isOutletPos || outletField !== '',
+                        outlet_name: outletField || null,
+                        disabled: !!e.disable,
+                    };
+                });
+            }
+            return { lorebooks: result };
         }
         case 'ask_user': {
             return { __ask_user: true, question: toolInput.question, context: toolInput.context };

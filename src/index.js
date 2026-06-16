@@ -1,7 +1,7 @@
 import { EXT_NAME, EXT_DISPLAY, CHANGELOG, I, WIN_ID, ICON_ID, MODAL_ID, ICON_STORAGE_KEY } from './constants.js';
 import { state } from './state.js';
 import { getSettings, saveSettings, initChatBucket, getChatBucket, setActiveSession, deleteCurrentSession, getCurrentSession, exportCurrentSession, importSession, showSessionDialog } from './session.js';
-import { _dbgSetupGlobalErrorHandlers, _dbgAdd, dbgDownload } from './utils/util-debug.js';
+import { _dbgSetupGlobalErrorHandlers, _dbgAdd, dbgDownload, _dbgSnapshotSettings } from './utils/util-debug.js';
 import { showCustomDialog, escHtml, autoResize, copyText } from './utils/util-dom.js';
 
 import { restoreWindowState, applyCustomTheme, applyWindowBackground, hideWindow, showWindow, minimize, toggleVisibility, makeDraggable, makeResizable, makeIconDraggable, updateIconVisibility, toggleGhostMode, setupGhostHotkey, setupHotkey } from './ui/ui-window.js';
@@ -445,7 +445,7 @@ function attachWindowListeners() {
         if (activeTab?.dataset.tab === 'json') {
             copyText(document.getElementById('scp-ctx-json')?.textContent || '');
         } else {
-            import('./api.js').then(m => copyText(m.formatPayloadAsText(m._lastInspectorMessages || [])));
+            import('./ui/ui-widgets.js').then(m => copyText(apiMod.formatPayloadAsText(m._lastInspectorMessages || [])));
         }
     });
 
@@ -479,7 +479,8 @@ async function init() {
     
     await loadManifestVersion();
     
-    getSettings(); 
+    getSettings();
+    _dbgSnapshotSettings();
     await injectUI();
     
     const ctx = SillyTavern.getContext();

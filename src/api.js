@@ -959,7 +959,7 @@ export async function runGenerate(session, userText, addUserMsg = true, processe
         if (result === null) {
             if (streamMsgId && isStreaming && streamAccumText) {
                 const msg = session.messages.find(m => m.id === streamMsgId);
-                if (msg) { msg.content = streamAccumText; msg.reasoning = streamAccumReasoning || null; saveSettings(); }
+                if (msg) { msg.content = streamAccumText; msg.reasoning = streamAccumReasoning || null; saveSessionsToMetadata(); }
                 if (streamContentEl) { streamContentEl.innerHTML = renderMarkdown(streamAccumText); postProcessHTMLBlocks(streamContentEl); }
             } else if (streamMsgId) {
                 const idx = session.messages.findIndex(m => m.id === streamMsgId);
@@ -984,7 +984,7 @@ export async function runGenerate(session, userText, addUserMsg = true, processe
                 msg.reasoning = fullReasoning || null; 
                 msg.toolCalls = state.activeToolCalls.length ? JSON.parse(JSON.stringify(state.activeToolCalls)) : undefined; 
             }
-            saveSettings();
+            saveSessionsToMetadata();
 
             if (msg && streamMsgEl) {
                 _renderMsgBodyContent(streamMsgEl, msg);

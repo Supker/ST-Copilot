@@ -1275,46 +1275,84 @@ let _pendingTokenCalc = false;
 export function updateMsgCount(session) {
     const el = document.getElementById('scp-msg-count');
     if (el && session) el.textContent = `${session.messages.length} msgs`;
-    
+
     const tel = document.getElementById('scp-token-count');
-    if (tel && session) {
-        clearTimeout(_tokenCalcTid);
-        _tokenCalcTid = setTimeout(() => {
-            if (_isTokenCalculating) {
-                _pendingTokenCalc = true;
-                return;
-            }
-            const runCalc = () => {
-                _isTokenCalculating = true;
-                try {
-                    const settings = getEffectiveSettings();
-                    const currentInput = document.getElementById('scp-input')?.value || '';
-                    let totalChars = (settings.systemPrompt || '').length;
-                    const limit = Math.max(1, parseInt(settings.localHistoryLimit) || 50);
-                    for (const m of session.messages.slice(-limit)) {
-                        totalChars += (m.content || '').length;
-                    }
-                    const depth = Math.max(0, parseInt(settings.contextDepth) || 0);
-                    const ctx = SillyTavern.getContext();
-                    const chat = ctx.chat || [];
-                    for (const m of chat.slice(-depth)) {
-                        totalChars += (m.mes || '').length;
-                    }
-                    totalChars += currentInput.length;
-                    const count = Math.ceil(totalChars / 3.5);
-                    const telNode = document.getElementById('scp-token-count');
-                    if (telNode) telNode.textContent = `~${count} tkns`;
-                } finally {
-                    _isTokenCalculating = false;
-                    if (_pendingTokenCalc) {
-                        _pendingTokenCalc = false;
-                        runCalc();
+    if (!tel || !session) return;
+
+    clearTimeout(_tokenCalcTid);
+    _tokenCalcTid = setTimeout(() => {
+        if (_isTokenCalculating) { _pendingTokenCalc = true; return; }
+
+        const runCalc = async () => {
+            _isTokenCalculating = true;
+            try {
+                const settings = getEffectiveSettings();
+                const currentInput = document.getElementById('scp-input')?.value || '';
+                
+                if (apiMod && apiMod.assembleMessages && apiMod.estimateTokens) {
+                    try {
+                        const tempSess = { ...session, messages: [...session.messages] };
+                        if (currentInput.trim() || state.pendingAttachments?.length) {
+                            tempSess.messages.push({ 
+                                id: 'tmp', 
+                                role: 'user', 
+                                content: currentInput, 
+                                timestamp: Date.now(),
+                                attachments: state.pendingAttachments || []
+                            });
+                        }
+                        const builtMsgs = await apiMod.assembleMessages(tempSess, settings, null);
+                        const fullText = builtMsgs.map(m => m.content).join('\n');
+                        const tokens = await apiMod.estimateTokens(fullText);
+                        const node = document.getElementById('scp-token-count');
+                        if (node) node.textContent = `~${tokens} tkns`;
+                        return;
+                    } catch (e) {
+                        console.warn('ST-Copilot: Exact token calculation failed, falling back', e);
                     }
                 }
-            };
-            runCalc();
-        }, 400);
-    }
+
+                const ctx = SillyTavern.getContext();
+                const incHidden = !!settings.includeHiddenMessages;
+
+                let totalChars = (settings.systemPrompt || '').length;
+
+                const depth = Math.max(0, parseInt(settings.contextDepth) || 0);
+                const chat = ctx.chat || [];
+                let chatSlice = [];
+                try {
+                    const sess = getCurrentSession();
+                    const picked = sess?.pickedChatIndices;
+                    if (picked && picked.length > 0) {
+                        chatSlice = picked.filter(i => i >= 0 && i < chat.length).map(i => chat[i]);
+                    } else if (depth > 0) {
+                        chatSlice = chat.slice(-depth);
+                    }
+                } catch(_) {
+                    if (depth > 0) chatSlice = chat.slice(-depth);
+                }
+
+                for (const m of chatSlice) {
+                    if (!incHidden && (m.is_system || m.is_hidden || m.extra?.is_hidden || m.extra?.sc_ghosted)) continue;
+                    totalChars += (m.mes || '').length;
+                }
+
+                const limit = Math.max(1, parseInt(settings.localHistoryLimit) || 50);
+                for (const m of session.messages.slice(-limit)) {
+                    totalChars += (m.content || '').length;
+                }
+
+                totalChars += currentInput.length;
+                const count = Math.ceil(totalChars / 3.5);
+                const node = document.getElementById('scp-token-count');
+                if (node) node.textContent = `~${count} tkns`;
+            } finally {
+                _isTokenCalculating = false;
+                if (_pendingTokenCalc) { _pendingTokenCalc = false; runCalc(); }
+            }
+        };
+        runCalc();
+    }, 400);
 }
 
 export function updateDepthSlidersMax() {

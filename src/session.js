@@ -84,6 +84,7 @@ export function getSettings() {
             tags: true, description: true, personality: true,
             scenario: true, first_mes: true, mes_example: true,
             alternate_greetings: false, authors_note: true,
+            system_prompt: true, post_history_instructions: true, name: false,
         },
         completionSound: 'none',
         completionSoundVolume: 80,
@@ -111,6 +112,7 @@ export function getSettings() {
         toolsMaxRounds: 5,
         toolsEnabled_search_chat: true,
         toolsEnabled_search_lorebook: true,
+        toolsEnabled_get_lorebooks: true,
         toolsEnabled_ask_user: true,
         toolsEnabled_get_char_info: true,
         toolsEnabled_get_chat_stats: true,
@@ -195,12 +197,12 @@ export function hasSessionOverrides() {
 }
 
 // ─── Storage Subsystem ─────────────────────────────
-let _inMemoryBucket = { activeSessionId: null, sessions: [] };
-let _currentFileId = null;
-let _bucketDirty = false;
-let _commitTimer = null;
 
-export async function saveSessionFile(file_id, payload) {
+let _inMemoryBucket = { activeSessionId: null, sessions: [] };
+let _currentSessionFileId = null;
+const _saveQueue = new Map();
+
+export async function saveSessionFile(file_id, payload, useKeepalive = false) {
     const ctx = SillyTavern.getContext();
     try {
         const jsonStr = JSON.stringify(payload);
@@ -208,7 +210,8 @@ export async function saveSessionFile(file_id, payload) {
         const res = await fetch('/api/files/upload', {
             method: 'POST',
             headers: { ...ctx.getRequestHeaders(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: file_id, data: b64 })
+            body: JSON.stringify({ name: file_id, data: b64 }),
+            keepalive: useKeepalive
         });
         return res.ok;
     } catch (e) {
@@ -218,14 +221,33 @@ export async function saveSessionFile(file_id, payload) {
     }
 }
 
+window.addEventListener('beforeunload', () => {
+    for (const [fileId, item] of _saveQueue.entries()) {
+        clearTimeout(item.timer);
+        saveSessionFile(fileId, item.payload, true);
+    }
+});
+
 export async function loadSessionFile(file_id) {
     try {
         const res = await fetch(`/user/files/${file_id}`);
-        if (!res.ok) return null;
-        return await res.json();
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const text = await res.text();
+        const trimmed = text.trim();
+        if (!trimmed) return null;
+
+        if (trimmed.startsWith('<') || trimmed.startsWith('<!DOCTYPE')) {
+            _dbgAdd('STORAGE_LOAD_HTML_REDIRECT', { file_id });
+            return null;
+        }
+
+        return JSON.parse(trimmed);
     } catch (e) {
+        _dbgAdd('STORAGE_LOAD_ERROR', { file_id, error: e.message });
         console.error(`[${EXT_DISPLAY}] loadSessionFile error:`, e);
-        return null;
+        return false; 
     }
 }
 
@@ -233,108 +255,117 @@ export async function initChatBucket() {
     const ctx = SillyTavern.getContext();
     if (!ctx.chatMetadata) ctx.chatMetadata = {};
     const { charId, chatId } = getBindingKey();
-    const s = getSettings();
     
+    for (const [fileId, item] of _saveQueue.entries()) {
+        clearTimeout(item.timer);
+        _saveQueue.delete(fileId);
+        saveSessionFile(fileId, item.payload);
+    }
+
     let meta = ctx.chatMetadata.st_copilot;
-    const safeChatId = chatId.replace(/[^a-zA-Z0-9_-]/g, '_');
-    
-    let v0Data = null;
-    if (s.sessions && s.sessions[charId]) {
-        if (s.sessions[charId][chatId] && s.sessions[charId][chatId].sessions?.length > 0) {
-            v0Data = { ...s.sessions[charId][chatId] };
-            delete s.sessions[charId][chatId];
-        } else if (s.sessions[charId]['unified'] && s.sessions[charId]['unified'].sessions?.length > 0) {
-            v0Data = { ...s.sessions[charId]['unified'] };
-            delete s.sessions[charId]['unified'];
+    let targetFileId = null;
+    let payload = null;
+
+    if (meta && meta.file_id && meta.format === 'v4') {
+        if (meta.chat_id === chatId) {
+            targetFileId = meta.file_id;
+            payload = await loadSessionFile(targetFileId);
+        } else {
+            _dbgAdd('STORAGE_CHAT_BRANCH_DETECTED', { oldChatId: meta.chat_id, newChatId: chatId });
+            payload = await loadSessionFile(meta.file_id);
+            targetFileId = `copilot_sess_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.json`;
+            
+            if (payload && payload !== false) {
+                await saveSessionFile(targetFileId, payload);
+            }
+            
+            ctx.chatMetadata.st_copilot = { format: 'v4', file_id: targetFileId, chat_id: chatId };
+            if (typeof ctx.saveMetadata === 'function') ctx.saveMetadata();
         }
-        if (v0Data) saveSettings();
-    }
+    } else {
+        targetFileId = `copilot_sess_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.json`;
+        _dbgAdd('STORAGE_MIGRATION_V4_INIT', { targetFileId });
+        
+        const safeChatId = chatId.replace(/[^a-zA-Z0-9_-]/g, '_');
+        payload = await loadSessionFile(`copilot_sess_${safeChatId}.json`);
 
-    if (!meta && v0Data) {
-        _dbgAdd('LEGACY_MIGRATION_STARTED');
-        meta = { activeSessionId: v0Data.activeSessionId, sessions: v0Data.sessions };
-    }
+        if (!payload && meta && meta.file_id && meta.format !== 'v4') {
+            payload = await loadSessionFile(meta.file_id);
+        }
 
-    if (!meta) {
-        _inMemoryBucket = { activeSessionId: null, sessions: [] };
-        _currentFileId = `copilot_sess_${safeChatId}_${Date.now()}.json`;
-        ctx.chatMetadata.st_copilot = { file_id: _currentFileId };
+        if (!payload) {
+            const s = getSettings();
+            if (s.sessions && s.sessions[charId]) {
+                if (s.sessions[charId][chatId] && s.sessions[charId][chatId].sessions?.length > 0) {
+                    payload = { bucket: { ...s.sessions[charId][chatId] } };
+                    delete s.sessions[charId][chatId]; saveSettings();
+                } else if (s.sessions[charId]['unified'] && s.sessions[charId]['unified'].sessions?.length > 0) {
+                    payload = { bucket: { ...s.sessions[charId]['unified'] } };
+                    delete s.sessions[charId]['unified']; saveSettings();
+                }
+            }
+        }
+
+        ctx.chatMetadata.st_copilot = { format: 'v4', file_id: targetFileId, chat_id: chatId };
         if (typeof ctx.saveMetadata === 'function') ctx.saveMetadata();
-        await commitBucketChanges(true);
+    }
+
+    _currentSessionFileId = targetFileId;
+
+    if (payload === false) {
+        _dbgAdd('STORAGE_READONLY_LOCK_ACTIVATED', { fileId: targetFileId });
+        toastr.error('Failed to load Copilot session. Overwrites blocked to prevent data loss.', EXT_DISPLAY);
+        _inMemoryBucket = { activeSessionId: null, sessions: [], _readOnlyLock: true };
         return;
     }
 
-    if (meta.file_id) {
-        _currentFileId = meta.file_id;
-        const payload = await loadSessionFile(meta.file_id);
-        if (payload && payload.bucket) {
-            _inMemoryBucket = payload.bucket;
-        } else {
-            _inMemoryBucket = { activeSessionId: null, sessions: [] };
-            await commitBucketChanges(true);
-        }
-    } else if (meta.sessions) { 
-        _inMemoryBucket = { activeSessionId: meta.activeSessionId, sessions: meta.sessions };
-        _currentFileId = `copilot_sess_${safeChatId}_${Date.now()}.json`;
-        ctx.chatMetadata.st_copilot = { file_id: _currentFileId };
-        delete meta.sessions;
-        delete meta.activeSessionId; 
-        if (typeof ctx.saveMetadata === 'function') ctx.saveMetadata();
-        await commitBucketChanges(true);
+    if (payload && payload.bucket) {
+        _inMemoryBucket = payload.bucket;
     } else {
         _inMemoryBucket = { activeSessionId: null, sessions: [] };
-        _currentFileId = `copilot_sess_${safeChatId}_${Date.now()}.json`;
-        ctx.chatMetadata.st_copilot = { file_id: _currentFileId };
-        if (typeof ctx.saveMetadata === 'function') ctx.saveMetadata();
+    }
+
+    if (!payload || meta?.format !== 'v4') {
         await commitBucketChanges(true);
     }
 }
 
 export async function commitBucketChanges(force = false) {
-    _bucketDirty = true;
+    if (_inMemoryBucket._readOnlyLock) {
+        _dbgAdd('STORAGE_WRITE_BLOCKED_BY_LOCK', { fileName: _currentSessionFileId });
+        return;
+    }
+
+    const fileName = _currentSessionFileId;
+    if (!fileName) return;
+
+    const { chatId } = getBindingKey();
+    const snapshot = JSON.parse(JSON.stringify(_inMemoryBucket));
     
-    const doCommit = async () => {
-        if (!_bucketDirty) return;
-        const ctx = SillyTavern.getContext();
-        const { chatId } = getBindingKey();
-        
-        if (!ctx.chatMetadata) ctx.chatMetadata = {};
-        if (!ctx.chatMetadata.st_copilot && _currentFileId) {
-            ctx.chatMetadata.st_copilot = { file_id: _currentFileId };
-        }
-        
-        let file_id = ctx.chatMetadata?.st_copilot?.file_id || _currentFileId;
-        
-        if (!file_id) {
-            const safeChatId = chatId.replace(/[^a-zA-Z0-9_-]/g, '_');
-            file_id = `copilot_sess_${safeChatId}_${Date.now()}.json`;
-            _currentFileId = file_id;
-            ctx.chatMetadata.st_copilot = { file_id };
-        }
-        
-        if (ctx.chatMetadata.st_copilot?.file_id !== file_id) {
-            ctx.chatMetadata.st_copilot = { file_id };
-        }
-        
-        if (typeof ctx.saveMetadata === 'function') ctx.saveMetadata();
-        
-        const payload = {
-            _version: 2,
-            chat_id_reference: chatId,
-            updated_at: Date.now(),
-            bucket: _inMemoryBucket
-        };
-        
-        const success = await saveSessionFile(file_id, payload);
-        if (success) _bucketDirty = false;
-        else _dbgAdd('STORAGE_WRITE_FAILED', { file_id, reason: 'saveSessionFile returned false' });
+    const payloadToSave = {
+        _version: 4,
+        chat_id_reference: chatId,
+        updated_at: Date.now(),
+        bucket: snapshot
     };
 
     if (force) {
-        await doCommit();
+        const existing = _saveQueue.get(fileName);
+        if (existing) clearTimeout(existing.timer);
+        _saveQueue.delete(fileName);
+        
+        const success = await saveSessionFile(fileName, payloadToSave);
+        if (!success) _dbgAdd('STORAGE_WRITE_FAILED', { fileName });
     } else {
-        clearTimeout(_commitTimer);
-        _commitTimer = setTimeout(doCommit, 1000);
+        const existing = _saveQueue.get(fileName);
+        if (existing) clearTimeout(existing.timer);
+
+        const timer = setTimeout(() => {
+            _saveQueue.delete(fileName);
+            saveSessionFile(fileName, payloadToSave);
+        }, 1000);
+
+        _saveQueue.set(fileName, { timer, payload: payloadToSave });
     }
 }
 

@@ -7,6 +7,7 @@ export function buildChatEditAIInstructions(settings) {
     if (!settings.chatEditAIEnabled) return '';
     const ctx = SillyTavern.getContext();
     const stMsgs = ctx.chat || [];
+    const chatDisplayName = ctx.chatMetadata?.name || (typeof window.chat_file_name === 'string' ? window.chat_file_name : '') || 'unknown';
     const depth = Math.max(0, parseInt(settings.contextDepth) || 0);
     let slice;
     try {
@@ -24,7 +25,8 @@ export function buildChatEditAIInstructions(settings) {
     const base = (settings.chatEditPrompt || DEFAULT_CHAT_EDIT_DIRECTIVE.trim())
         .replace('{{chat_edit_format}}', CHAT_EDIT_FORMAT_BLOCK)
         .replace('{{active_chat_ids}}', activeChatIds);
-    return `<chat_messages_editing>\n${base}\n</chat_messages_editing>`;
+    const chatNameNote = `\nCurrent chat name: "${chatDisplayName}"`;
+    return `<chat_messages_editing>\n${base}${chatNameNote}\n</chat_messages_editing>`;
 }
 
 export function parseChatChangesFromText(text) {
@@ -52,7 +54,13 @@ export function _sanitizeChatChanges(changes) {
     const valid = [];
     for (const c of changes) {
         if (!c || typeof c !== 'object') continue;
-        if (!['replace', 'overwrite', 'prepend', 'append', 'bulk_replace', 'regex', 'delete', 'add', 'hide', 'unhide'].includes(c.action)) continue;
+        if (!['replace', 'overwrite', 'prepend', 'append', 'bulk_replace', 'regex', 'delete', 'add', 'hide', 'unhide', 'rename_chat'].includes(c.action)) continue;
+
+        if (c.action === 'rename_chat') {
+            if (!c.name?.trim()) continue;
+            valid.push(c);
+            continue;
+        }
 
         if (c.msg_indices !== undefined) {
             if (typeof c.msg_indices === 'string') {
@@ -178,6 +186,32 @@ export async function applyChatChanges(changes, afterMsgId = null) {
 
     for (const change of changes) {
         try {
+            if (change.action === 'rename_chat') {
+                const newName = change.name.trim();
+                const ctx2 = SillyTavern.getContext();
+                const oldFileName = window.chat_file_name;
+                
+                try {
+                    if (typeof ctx2.executeSlashCommandsWithOptions === 'function') {
+                        await ctx2.executeSlashCommandsWithOptions(`/renamechat ${newName}`);
+                    }
+                    
+                    if (window.chat_file_name && window.chat_file_name !== oldFileName) {
+                        const sess = getCurrentSession();
+                        if (sess && sess.stChatId === oldFileName) {
+                            sess.stChatId = window.chat_file_name;
+                        }
+                    }
+                    
+                    if (ctx2.chatMetadata) {
+                        ctx2.chatMetadata.name = newName;
+                    }
+                    successLog.push(change);
+                } catch(e) {
+                    console.error('[ChatEdit] Error renaming chat', e);
+                }
+                continue;
+            }
             if (change.action === 'hide' || change.action === 'unhide') {
                 const cmd = change.action === 'hide' ? '/hide' : '/unhide';
                 if (Array.isArray(change.msg_indices) && change.msg_indices.length) {

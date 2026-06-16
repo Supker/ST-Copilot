@@ -156,6 +156,8 @@
             <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ce-first-mes"><span>First Message</span></label>
             <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ce-mes-example"><span>Example Dialogue</span></label>
             <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ce-authors-note"><span>Author's Note</span></label>
+            <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ce-system-prompt"><span>Main Prompt Override</span></label>
+            <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ce-post-history"><span>Post-History Instructions</span></label>
             <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ce-alt-greetings"><span>Alternate Greetings <span class="scp-sp-hint">(off by default — can be large)</span></span></label>
             <div id="scp-sp-ce-alt-greetings-picker" style="display:none;margin-top:4px"></div>
           </div>
@@ -403,6 +405,14 @@
             <div class="scp-sp-ov-check-row">
               <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-ce-authors-note"><span>Author's Note</span></label>
               <button class="scp-sp-ov-clear" data-ovkey="charField_authors_note" title="Clear override" disabled>↺</button>
+            </div>
+            <div class="scp-sp-ov-check-row">
+              <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-ce-system-prompt"><span>Main Prompt Override</span></label>
+              <button class="scp-sp-ov-clear" data-ovkey="charField_system_prompt" title="Clear override" disabled>↺</button>
+            </div>
+            <div class="scp-sp-ov-check-row">
+              <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-ce-post-history"><span>Post-History Instructions</span></label>
+              <button class="scp-sp-ov-clear" data-ovkey="charField_post_history_instructions" title="Clear override" disabled>↺</button>
             </div>
             <div class="scp-sp-ov-check-row">
               <label class="scp-sp-check"><input type="checkbox" id="scp-sp-ov-ce-alt-greetings"><span>Alternate Greetings</span></label>

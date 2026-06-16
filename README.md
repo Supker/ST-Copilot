@@ -124,6 +124,12 @@ A fully integrated, highly detailed theme editor.
 ---
 
 ## 📜 Changelog History
+### V2.8.2
+*   **Character Management:** Expanded AI capabilities to read and modify Character Name, Main Prompt Override, and Post-History Instructions.
+*   **Lorebook Tools:** Introduced `get_lorebooks` and enhanced `search_lorebook_entries` with `is_constant` and `is_outlet` parameters.
+*   **Autonomous Outlets:** The LLM can now manage Lorebook Outlets (Reset Lorebook Prompt to default to provide necessary context).
+*   **Chat & Sessions:** Added chat renaming support and resolved critical session deletion/overwrite bugs.
+*   **Maintenance:** Improved token tracking accuracy and optimized internal save logic.
 
 ### V2.8.1
 *   **World Info Outlets:** Added full support for the `{{outlet::name}}` macro syntax, enabling dynamic content injection directly from World Info entries.

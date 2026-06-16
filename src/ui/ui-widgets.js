@@ -847,7 +847,7 @@ export function _buildContextInspectorHTML(messages) {
     return `<div class="scp-ctx-inspector">${styleHtml}<nav class="scp-ctx-nav">${navHtml}</nav><div class="scp-ctx-body" id="scp-ctx-body">${bodyHtml}</div></div>`;
 }
 
-let _lastInspectorMessages = [];
+export let _lastInspectorMessages = [];
 
 export async function openInspector() {
     const sess = getCurrentSession();

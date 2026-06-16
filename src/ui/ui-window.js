@@ -1,6 +1,6 @@
 import { getSettings, saveSettings } from '../session.js';
 import { state } from '../state.js';
-import { THEME_CSS_MAP, THEME_PRESETS, ICON_STORAGE_KEY, WIN_ID } from '../constants.js';
+import { THEME_CSS_MAP, THEME_PRESETS, ICON_STORAGE_KEY, WIN_ID, EXT_DISPLAY } from '../constants.js';
 import { scrollToBottom } from './ui-chat.js';
 
 export function makeDraggable(handle, target) {

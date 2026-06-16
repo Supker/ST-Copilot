@@ -25,14 +25,24 @@ export function buildCharacterContextBlock(settings) {
         parts.push(`<tags>\n${charTags.join(', ')}\n</tags>`);
     }
 
+    const sysPrompt = d.system_prompt || char.system_prompt;
+    if (getEffectiveCharField(settings, 'system_prompt') && sysPrompt) {
+        parts.push(`<character_system_prompt_override>\n${sysPrompt}\n</character_system_prompt_override>`);
+    }
+    const postHist = d.post_history_instructions || char.post_history_instructions;
+    if (getEffectiveCharField(settings, 'post_history_instructions') && postHist) {
+        parts.push(`<post_history_instructions>\n${postHist}\n</post_history_instructions>`);
+    }
+
     const simple = {
+        name: char.name,
         description: d.description || char.description,
         personality: d.personality || char.personality,
         scenario: d.scenario || char.scenario,
         first_mes: d.first_mes || char.first_mes,
         mes_example: d.mes_example || char.mes_example,
     };
-
+    
     if (getSettings().useAspectEvolutia) {
         const aeFields = _getAspectEvolutiaCharFields();
         if (aeFields && aeFields.length) {
@@ -44,7 +54,7 @@ export function buildCharacterContextBlock(settings) {
     }
 
     for (const [key, val] of Object.entries(simple)) {
-        if (getEffectiveCharField(settings, key) && val) parts.push(`<${key}>\n${val}\n</${key}>`);
+        if ((key === 'name' || getEffectiveCharField(settings, key)) && val) parts.push(`<${key}>\n${val}\n</${key}>`);
     }
     if (getEffectiveCharField(settings, 'alternate_greetings') && Array.isArray(d.alternate_greetings) && d.alternate_greetings.length) {
         const agMap = settings.altGreetingIndices || {};
@@ -65,8 +75,8 @@ export function buildCharacterContextBlock(settings) {
 
 export function buildCharEditAIInstructions(settings) {
     if (!settings.charEditAIEnabled) return '';
-    const baseFields = ['tags', 'description', 'personality', 'scenario', 'first_mes', 'mes_example', 'authors_note', 'alternate_greetings'];
-    const fieldsList = baseFields.filter(k => getEffectiveCharField(settings, k));
+    const baseFields = ['name', 'tags', 'description', 'personality', 'scenario', 'first_mes', 'mes_example', 'authors_note', 'alternate_greetings', 'system_prompt', 'post_history_instructions'];
+    const fieldsList = baseFields.filter(k => k === 'name' || getEffectiveCharField(settings, k));
     
     if (settings.includeUserPersonality && !fieldsList.includes('user_persona')) {
         fieldsList.push('user_persona');
@@ -303,9 +313,12 @@ export function getCharFieldValue(char, fieldId) {
         return f ? f.content : '';
     }
     
+    if (fieldId === 'name') return char.name || '';
     const d = char.data || {};
     if (fieldId === 'authors_note') return getAuthorsNote();
     if (fieldId === 'alternate_greetings') return d.alternate_greetings || [];
+    if (fieldId === 'system_prompt') return d.system_prompt || char.system_prompt || '';
+    if (fieldId === 'post_history_instructions') return d.post_history_instructions || char.post_history_instructions || '';
     return d[fieldId] || char[fieldId] || '';
 }
 
@@ -393,6 +406,39 @@ export async function saveCharacterField(char, fieldId, newValue) {
         
         if (typeof ctx.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
         else if (typeof window.saveSettingsDebounced === 'function') window.saveSettingsDebounced();
+        return;
+    }
+
+    if (fieldId === 'name') {
+        const trimmedName = (newValue || '').trim();
+        if (!trimmedName) throw new Error('Character name cannot be empty');
+        
+        if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
+            const safeName = trimmedName.replace(/"/g, '\\"');
+            await ctx.executeSlashCommandsWithOptions(`/rename-char silent=true chats=true "${safeName}"`);
+            return;
+        }
+
+        const renameRes = await fetch('/api/characters/rename', {
+            method: 'POST',
+            headers: { ...ctx.getRequestHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ avatar_url: char.avatar, new_name: trimmedName }),
+        });
+        if (!renameRes.ok) {
+            const errText = await renameRes.text().catch(() => renameRes.statusText);
+            throw new Error(`Rename failed: HTTP ${renameRes.status}: ${errText}`);
+        }
+        char.name = trimmedName;
+        if (char.data) char.data.name = trimmedName;
+        if (typeof ctx.getCharacters === 'function') await ctx.getCharacters().catch(() => {});
+        else if (typeof window.getCharacters === 'function') await window.getCharacters().catch(() => {});
+        const es = ctx.eventSource || window.eventSource;
+        const et = ctx.event_types || window.event_types;
+        if (es && et?.CHARACTER_EDITED) {
+            es.emit(et.CHARACTER_EDITED, { detail: { id: ctx.characterId, character: char } });
+            es.emit(et.CHARACTER_EDITED, { id: ctx.characterId, character: char });
+        }
+        if (typeof window.PrintCharacterList === 'function') window.PrintCharacterList();
         return;
     }
     
@@ -536,7 +582,9 @@ export async function saveCharacterField(char, fieldId, newValue) {
         personality: 'personality_textarea',
         scenario: 'scenario_pole',
         first_mes: 'firstmessage_textarea',
-        mes_example: 'mes_example_textarea'
+        mes_example: 'mes_example_textarea',
+        system_prompt: 'system_prompt_textarea',
+        post_history_instructions: 'post_history_instructions_textarea',
     };
 
     if (domMap[fieldId]) {

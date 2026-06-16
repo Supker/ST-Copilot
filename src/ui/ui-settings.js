@@ -2,75 +2,9 @@ import { THEME_PRESETS, THEME_VAR_DEFS, THEME_CSS_MAP, EXT_DISPLAY, DEFAULT_SYST
 import { state } from '../state.js';
 import { getSettings, saveSettings, getEffectiveSettings, setSessionOverride, clearAllSessionOverrides, getBindingKey, hasSessionOverrides, saveSessionsToMetadata, getCurrentSession, getSessionOverrides, getChatBucket } from '../session.js';
 import { showCustomDialog, escHtml } from '../utils/util-dom.js';
+import { applyCustomTheme } from './ui-window.js';
 import { showColorPicker } from '../utils/util-colorpicker.js';
 import { _dbgAdd } from '../utils/util-debug.js';
-
-// ─── Sounds ───────────────────────────────────────────────────────────────────
-
-export const _SOUND_PRESETS = {
-    none:    { label: 'None' },
-    chime:   { label: 'Chime' },
-    bell:    { label: 'Bell' },
-    soft:    { label: 'Soft Ping' },
-    digital: { label: 'Digital Blip' },
-    pop:     { label: 'Pop' },
-};
-
-function _synthSound(type, volume = 80) {
-    try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const masterGain = ctx.createGain();
-        masterGain.gain.value = Math.max(0, Math.min(1, volume / 100));
-        masterGain.connect(ctx.destination);
-        const now = ctx.currentTime;
-
-        if (type === 'chime') {
-            [523.25, 659.25, 783.99].forEach((freq, i) => {
-                const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = freq;
-                const og = ctx.createGain();
-                o.connect(og); og.connect(masterGain);
-                og.gain.setValueAtTime(0, now + i * 0.12);
-                og.gain.linearRampToValueAtTime(0.18, now + i * 0.12 + 0.02);
-                og.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.5);
-                o.start(now + i * 0.12); o.stop(now + i * 0.12 + 0.5);
-            });
-        } else if (type === 'bell') {
-            const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = 880;
-            const og = ctx.createGain();
-            o.connect(og); og.connect(masterGain);
-            og.gain.setValueAtTime(0.25, now);
-            og.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
-            o.start(now); o.stop(now + 1.2);
-        } else if (type === 'soft') {
-            const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = 660;
-            const og = ctx.createGain();
-            o.connect(og); og.connect(masterGain);
-            og.gain.setValueAtTime(0, now);
-            og.gain.linearRampToValueAtTime(0.15, now + 0.05);
-            og.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
-            o.start(now); o.stop(now + 0.4);
-        } else if (type === 'digital') {
-            [440, 880].forEach((freq, i) => {
-                const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = freq;
-                const og = ctx.createGain();
-                o.connect(og); og.connect(masterGain);
-                og.gain.setValueAtTime(0.08, now + i * 0.07);
-                og.gain.exponentialRampToValueAtTime(0.001, now + i * 0.07 + 0.12);
-                o.start(now + i * 0.07); o.stop(now + i * 0.07 + 0.12);
-            });
-        } else if (type === 'pop') {
-            const o = ctx.createOscillator(); o.type = 'sine';
-            o.frequency.setValueAtTime(600, now);
-            o.frequency.exponentialRampToValueAtTime(200, now + 0.1);
-            const og = ctx.createGain();
-            o.connect(og); og.connect(masterGain);
-            og.gain.setValueAtTime(0.22, now);
-            og.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
-            o.start(now); o.stop(now + 0.15);
-        }
-        setTimeout(() => ctx.close(), 2000);
-    } catch (_) {}
-}
 
 // ─── Configuration Profiles ───────────────────────────────────────────────────
 
@@ -491,7 +425,7 @@ export function buildThemeEditor(containerOverride) {
         s2.savedThemes[n] = JSON.parse(JSON.stringify(baseTheme));
         s2.activeThemeProfile = n;
         s2.customTheme = { ...s2.savedThemes[n] };
-        saveSettings(); buildThemeEditor(containerOverride); toastr.success(`Theme duplicated as "${n}"`, EXT_DISPLAY);
+        saveSettings(); applyCustomTheme(s2.customTheme); buildThemeEditor(containerOverride); toastr.success(`Theme duplicated as "${n}"`, EXT_DISPLAY);
     });
 
     profileRow.querySelector('#scp-theme-rename').addEventListener('click', async () => {
@@ -748,6 +682,8 @@ export function syncOverlayUI(key, val) {
         charField_first_mes: 'scp-sp-ov-ce-first-mes',
         charField_mes_example: 'scp-sp-ov-ce-mes-example',
         charField_authors_note: 'scp-sp-ov-ce-authors-note',
+        charField_system_prompt: 'scp-sp-ov-ce-system-prompt',
+        charField_post_history_instructions: 'scp-sp-ov-ce-post-history',
         charField_alternate_greetings: 'scp-sp-ov-ce-alt-greetings',
     };
 
@@ -847,6 +783,8 @@ export function updateSettingsUI() {
     setCe('scp-ce-first-mes', 'first_mes');
     setCe('scp-ce-mes-example', 'mes_example');
     setCe('scp-ce-authors-note', 'authors_note');
+    setCe('scp-ce-system-prompt', 'system_prompt');
+    setCe('scp-ce-post-history', 'post_history_instructions');
     const agEl = document.getElementById('scp-ce-alt-greetings'); if (agEl) agEl.checked = !!ceFields.alternate_greetings;
 
     const opSlider = document.getElementById('scp-opacity-slider');
@@ -1004,6 +942,8 @@ export function syncSPFromSettings() {
     gC('scp-sp-ce-first-mes', ceFields.first_mes !== false);
     gC('scp-sp-ce-mes-example', ceFields.mes_example !== false);
     gC('scp-sp-ce-authors-note', ceFields.authors_note !== false);
+    gC('scp-sp-ce-system-prompt', ceFields.system_prompt !== false);
+    gC('scp-sp-ce-post-history', ceFields.post_history_instructions !== false);
     gC('scp-sp-ce-alt-greetings', !!ceFields.alternate_greetings);
 
     gC('scp-sp-chat-edit-enabled', s.chatEditAIEnabled);
@@ -1066,6 +1006,8 @@ export function syncSPFromSettings() {
     ovCe('scp-sp-ov-ce-first-mes', 'charField_first_mes');
     ovCe('scp-sp-ov-ce-mes-example', 'charField_mes_example');
     ovCe('scp-sp-ov-ce-authors-note', 'charField_authors_note');
+    ovCe('scp-sp-ov-ce-system-prompt', 'charField_system_prompt');
+    ovCe('scp-sp-ov-ce-post-history', 'charField_post_history_instructions');
     ovCe('scp-sp-ov-ce-alt-greetings', 'charField_alternate_greetings');
 
     const ovC = (id, key) => {
@@ -1274,14 +1216,14 @@ export function setupSettingsHandlers() {
         if (btn) btn.style.display = ss.enabled ? '' : 'none';
         if (!ss.enabled) import('./ui-window.js').then(m => m.hideWindow());
         import('./ui-window.js').then(m => m.updateIconVisibility(document.getElementById('scp-dock-icon')));
-        import('./ui-chat.js').then(m => { if(m.setupHotkey) m.setupHotkey(); });
+        import('./ui-window.js').then(m => m.setupHotkey());
     });
     
     bindCheck('scp-hotkey-enabled', 'hotkeyEnabled');
     bindCheck('scp-include-sysprompt', 'includeSystemPrompt', updCtx);
     bindCheck('scp-include-persona', 'includeUserPersonality', updCtx);
     bindCheck('scp-include-alt-swipes', 'includeAlternateSwipes', updCtx);
-    bindCheck('scp-apply-regex', 'applyRegexToContext');
+    bindCheck('scp-apply-regex', 'applyRegexToContext', updCtx);
     
     ['scp-st-stream-auto', 'scp-st-stream-on', 'scp-st-stream-off'].forEach(id => {
         const btn = document.getElementById(id); if (!btn) return;
@@ -1364,7 +1306,7 @@ export function setupSettingsHandlers() {
     }
     
     bindInput('scp-hotkey', 'hotkey', null, () => {
-        import('./ui-chat.js').then(m => { if(m.setupHotkey) m.setupHotkey(); });
+        import('./ui-window.js').then(m => m.setupHotkey());
     });
     bindInput('scp-max-tokens', 'maxTokens', Number);
     bindInput('scp-history-limit', 'localHistoryLimit', Number, updCtx);
@@ -1399,6 +1341,7 @@ export function setupSettingsHandlers() {
             getSettings().charEditPrompt = (val.trim() === DEFAULT_CHAR_EDIT_DIRECTIVE.trim()) ? '' : val;
             saveSettings();
             _markDirty('config');
+            updCtx();
         });
     }
     
@@ -1425,6 +1368,8 @@ export function setupSettingsHandlers() {
     bGCharFieldST('scp-ce-first-mes', 'first_mes');
     bGCharFieldST('scp-ce-mes-example', 'mes_example');
     bGCharFieldST('scp-ce-authors-note', 'authors_note');
+    bGCharFieldST('scp-ce-system-prompt', 'system_prompt');
+    bGCharFieldST('scp-ce-post-history', 'post_history_instructions');
     bGCharFieldST('scp-ce-alt-greetings', 'alternate_greetings');
     
     document.getElementById('scp-ce-alt-greetings')?.addEventListener('change', () => {
@@ -1445,9 +1390,10 @@ export function setupSettingsHandlers() {
         if (el) el.value = DEFAULT_CHAR_EDIT_DIRECTIVE.trim();
         const ovEl = document.getElementById('scp-sp-char-edit-prompt');
         if (ovEl) ovEl.value = DEFAULT_CHAR_EDIT_DIRECTIVE.trim();
+        updCtx();
         toastr.success('Char edit prompt reset.', EXT_DISPLAY);
     });
-
+    
     document.getElementById('scp-reset-prompt')?.addEventListener('click', async () => {
         const ok = await showCustomDialog({ type: 'confirm', title: 'Reset System Prompt', message: 'Reset to default? Your current prompt will be lost.' });
         if (!ok) return;
@@ -1591,6 +1537,7 @@ export function setupSettingsHandlers() {
         memEnabledStEl.addEventListener('change', () => {
             getSettings().memoryEnabled = memEnabledStEl.checked; saveSettings();
             const ovEl = document.getElementById('scp-sp-memory-enabled'); if (ovEl) ovEl.checked = memEnabledStEl.checked;
+            updCtx();
         });
     }
     const memInjectStEl = document.getElementById('scp-memory-inject');
@@ -1599,6 +1546,7 @@ export function setupSettingsHandlers() {
         memInjectStEl.addEventListener('change', () => {
             getSettings().memoryInject = memInjectStEl.checked; saveSettings();
             const ovEl = document.getElementById('scp-sp-memory-inject'); if (ovEl) ovEl.checked = memInjectStEl.checked;
+            updCtx();
         });
     }
     document.getElementById('scp-open-memory-settings')?.addEventListener('click', () => {
@@ -1613,6 +1561,7 @@ export function setupSettingsHandlers() {
             saveSettings();
             const spEl = document.getElementById('scp-sp-memory-prompt');
             if (spEl) spEl.value = memPromptEl.value;
+            updCtx();
         });
     }
     document.getElementById('scp-reset-memory-prompt')?.addEventListener('click', async () => {
@@ -1623,6 +1572,7 @@ export function setupSettingsHandlers() {
         if (memPromptEl) memPromptEl.value = DEFAULT_MEMORY_PROMPT;
         const spEl = document.getElementById('scp-sp-memory-prompt');
         if (spEl) spEl.value = DEFAULT_MEMORY_PROMPT;
+        updCtx();
         toastr.success('Prompt reset.', EXT_DISPLAY);
     });
 
@@ -1633,6 +1583,7 @@ export function setupSettingsHandlers() {
         toolsEnabledStEl.addEventListener('change', () => {
             getSettings().toolsEnabled = toolsEnabledStEl.checked; saveSettings();
             const ovEl = document.getElementById('scp-sp-tools-enabled'); if (ovEl) ovEl.checked = toolsEnabledStEl.checked;
+            updCtx();
         });
     }
     document.getElementById('scp-open-tools-settings')?.addEventListener('click', () => {
@@ -1722,6 +1673,7 @@ export function setupSettingsHandlers() {
             _markDirty('config');
             const spEl2 = document.getElementById('scp-sp-chat-edit-prompt');
             if (spEl2) spEl2.value = chatEditPromptStEl.value;
+            updCtx();
         });
     }
     document.getElementById('scp-reset-chat-edit-prompt-st')?.addEventListener('click', async () => {
@@ -1731,6 +1683,7 @@ export function setupSettingsHandlers() {
         if (chatEditPromptStEl) chatEditPromptStEl.value = DEFAULT_CHAT_EDIT_DIRECTIVE.trim();
         const spEl2 = document.getElementById('scp-sp-chat-edit-prompt');
         if (spEl2) spEl2.value = DEFAULT_CHAT_EDIT_DIRECTIVE.trim();
+        updCtx();
         toastr.success('Chat edit prompt reset.', EXT_DISPLAY);
     });
 
@@ -2099,6 +2052,8 @@ export function setupSettingsPanelListeners() {
                 description: 'scp-ce-description', personality: 'scp-ce-personality',
                 scenario: 'scp-ce-scenario', first_mes: 'scp-ce-first-mes',
                 mes_example: 'scp-ce-mes-example', authors_note: 'scp-ce-authors-note',
+                system_prompt: 'scp-ce-system-prompt',
+                post_history_instructions: 'scp-ce-post-history',
                 alternate_greetings: 'scp-ce-alt-greetings',
             };
             const stEl = document.getElementById(stIdMap[fieldKey]);
@@ -2116,6 +2071,8 @@ export function setupSettingsPanelListeners() {
     bGCharField('scp-sp-ce-first-mes', 'first_mes');
     bGCharField('scp-sp-ce-mes-example', 'mes_example');
     bGCharField('scp-sp-ce-authors-note', 'authors_note');
+    bGCharField('scp-sp-ce-system-prompt', 'system_prompt');
+    bGCharField('scp-sp-ce-post-history', 'post_history_instructions');
     bGCharField('scp-sp-ce-alt-greetings', 'alternate_greetings');
     document.getElementById('scp-sp-ce-alt-greetings')?.addEventListener('change', () => {
         const picker = document.getElementById('scp-sp-ce-alt-greetings-picker');
@@ -2129,6 +2086,7 @@ export function setupSettingsPanelListeners() {
         getSettings().charEditPrompt = (val.trim() === DEFAULT_CHAR_EDIT_DIRECTIVE.trim()) ? '' : val;
         saveSettings();
         _markDirty('config');
+        import('./ui-chat.js').then(m => m.updateMsgCount(getCurrentSession()));
     });
     document.getElementById('scp-sp-reset-char-edit-prompt')?.addEventListener('click', async () => {
         const ok = await showCustomDialog({ type: 'confirm', title: 'Reset Char Edit Prompt', message: 'Reset to built-in default prompt?' });
@@ -2138,6 +2096,7 @@ export function setupSettingsPanelListeners() {
         _markDirty('config');
         const el = document.getElementById('scp-sp-char-edit-prompt');
         if (el) el.value = DEFAULT_CHAR_EDIT_DIRECTIVE.trim();
+        import('./ui-chat.js').then(m => m.updateMsgCount(getCurrentSession()));
         toastr.success('Char edit prompt reset to default.', EXT_DISPLAY);
     });
     bGCheck('scp-sp-chat-edit-enabled', 'chatEditAIEnabled', () => {
@@ -2160,6 +2119,7 @@ export function setupSettingsPanelListeners() {
         _markDirty('config');
         const stEl = document.getElementById('scp-chat-edit-prompt-st');
         if (stEl) stEl.value = val;
+        import('./ui-chat.js').then(m => m.updateMsgCount(getCurrentSession()));
     });
     document.getElementById('scp-sp-reset-chat-edit-prompt')?.addEventListener('click', async () => {
         const ok = await showCustomDialog({ type: 'confirm', title: 'Reset Chat Edit Prompt', message: 'Reset to default?' });
@@ -2169,6 +2129,7 @@ export function setupSettingsPanelListeners() {
         if (spEl) spEl.value = DEFAULT_CHAT_EDIT_DIRECTIVE.trim();
         const stEl = document.getElementById('scp-chat-edit-prompt-st');
         if (stEl) stEl.value = DEFAULT_CHAT_EDIT_DIRECTIVE.trim();
+        import('./ui-chat.js').then(m => m.updateMsgCount(getCurrentSession()));
         toastr.success('Chat edit prompt reset.', EXT_DISPLAY);
     });
 
@@ -2471,6 +2432,8 @@ export function setupSettingsPanelListeners() {
     bindOvCheck('scp-sp-ov-ce-first-mes', 'charField_first_mes');
     bindOvCheck('scp-sp-ov-ce-mes-example', 'charField_mes_example');
     bindOvCheck('scp-sp-ov-ce-authors-note', 'charField_authors_note');
+    bindOvCheck('scp-sp-ov-ce-system-prompt', 'charField_system_prompt');
+    bindOvCheck('scp-sp-ov-ce-post-history', 'charField_post_history_instructions');
     bindOvCheck('scp-sp-ov-ce-alt-greetings', 'charField_alternate_greetings');
 
     document.querySelectorAll('.scp-sp-ov-clear[data-ovkey]').forEach(btn => {
@@ -2501,6 +2464,8 @@ export function setupSettingsPanelListeners() {
                 charField_first_mes: ['scp-sp-ov-ce-first-mes'],
                 charField_mes_example: ['scp-sp-ov-ce-mes-example'],
                 charField_authors_note: ['scp-sp-ov-ce-authors-note'],
+                charField_system_prompt: ['scp-sp-ov-ce-system-prompt'],
+                charField_post_history_instructions: ['scp-sp-ov-ce-post-history'],
                 charField_alternate_greetings: ['scp-sp-ov-ce-alt-greetings'],
                 charEditAIEnabled: ['scp-sp-ov-char-edit-enabled'],
                 charEditPrompt: ['scp-sp-ov-char-edit-prompt'],
@@ -2814,208 +2779,6 @@ export function buildBackgroundSettingsUI(container) {
         allContainers.forEach(c => buildBackgroundSettingsUI(c));
         import('./ui-window.js').then(m => m.applyWindowBackground());
     });
-}
-
-export function buildSoundSettingsUI(container) {
-    if (!container) return;
-    container.innerHTML = '';
-    const s = getSettings();
-    if (!s.customSounds) s.customSounds = {};
-
-    if (s.completionSoundData && !s.customSounds['custom_legacy']) {
-        s.customSounds['custom_legacy'] = {
-            name: s.completionSoundFileName || 'Legacy Custom Sound',
-            data: s.completionSoundData
-        };
-        if (s.completionSound === 'custom') {
-            s.completionSound = 'custom_legacy';
-        }
-        delete s.completionSoundData;
-        delete s.completionSoundFileName;
-        saveSettings();
-    }
-
-    const isSP = container.id === 'scp-sp-sound-settings';
-
-    const typeRow = document.createElement('div');
-    typeRow.className = isSP ? 'scp-sp-field' : '';
-    if (!isSP) typeRow.style.marginTop = '10px';
-    
-    const typeLbl = document.createElement(isSP ? 'label' : 'b');
-    typeLbl.className = isSP ? 'scp-sp-label' : '';
-    if (!isSP) typeLbl.style.fontSize = '12px';
-    typeLbl.textContent = 'Completion Sound';
-    
-    const typeWrap = document.createElement('div');
-    typeWrap.style.cssText = 'display:flex;gap:6px;align-items:center';
-    if (!isSP) typeWrap.style.marginTop = '6px';
-    
-    const typeSel = document.createElement('select');
-    typeSel.className = isSP ? 'scp-sp-select text_pole' : 'text_pole';
-    typeSel.style.flex = '1';
-    
-    const renderDropdown = () => {
-        typeSel.innerHTML = '';
-        
-        const groupPreset = document.createElement('optgroup');
-        groupPreset.label = 'Presets';
-        for (const [key, preset] of Object.entries(_SOUND_PRESETS)) {
-            const opt = document.createElement('option');
-            opt.value = key; opt.textContent = preset.label;
-            groupPreset.appendChild(opt);
-        }
-        typeSel.appendChild(groupPreset);
-        
-        if (Object.keys(s.customSounds).length > 0) {
-            const groupCustom = document.createElement('optgroup');
-            groupCustom.label = 'Custom Sounds';
-            for (const [key, snd] of Object.entries(s.customSounds)) {
-                const opt = document.createElement('option');
-                opt.value = key; opt.textContent = snd.name;
-                groupCustom.appendChild(opt);
-            }
-            typeSel.appendChild(groupCustom);
-        }
-        
-        typeSel.value = s.completionSound || 'none';
-        if (!typeSel.value) {
-            typeSel.value = 'none';
-            s.completionSound = 'none';
-            saveSettings();
-        }
-    };
-    renderDropdown();
-
-    const testBtn = document.createElement('button');
-    testBtn.className = isSP ? 'scp-action-btn' : 'menu_button interactable';
-    testBtn.innerHTML = `<i class="fa-solid fa-play"></i><span>Test</span>`;
-    if (!isSP) testBtn.style.flex = '0 0 auto';
-    testBtn.addEventListener('click', () => playCompletionSound());
-    
-    typeWrap.appendChild(typeSel);
-    typeWrap.appendChild(testBtn);
-    typeRow.appendChild(typeLbl);
-    typeRow.appendChild(typeWrap);
-    container.appendChild(typeRow);
-
-    const customActionsWrap = document.createElement('div');
-    customActionsWrap.style.cssText = isSP ? 'display:flex;gap:6px;margin-top:6px' : 'display:flex;gap:6px;margin-top:6px;align-items:center';
-    
-    const uploadBtn = document.createElement('button');
-    uploadBtn.className = isSP ? 'scp-action-btn' : 'menu_button interactable';
-    uploadBtn.innerHTML = `<i class="fa-solid fa-upload"></i><span>Upload Custom</span>`;
-    if (!isSP) uploadBtn.style.flex = '1';
-
-    uploadBtn.addEventListener('click', () => {
-        const inp = document.createElement('input');
-        inp.type = 'file'; inp.accept = 'audio/*';
-        inp.onchange = async () => {
-            const file = inp.files?.[0]; if (!file) return;
-            if (file.size > 5 * 1024 * 1024) { toastr.warning('File too large (>5MB).', EXT_DISPLAY); return; }
-            
-            const dataUrl = await new Promise((res, rej) => {
-                const r = new FileReader();
-                r.onload = () => res(r.result);
-                r.onerror = () => rej(null);
-                r.readAsDataURL(file);
-            });
-            if (!dataUrl) return;
-            
-            const s2 = getSettings();
-            const id = 'custom_' + Date.now();
-            s2.customSounds[id] = { name: file.name, data: dataUrl };
-            s2.completionSound = id;
-            saveSettings();
-            
-            const otherContainers = [document.getElementById('scp-sound-settings'), document.getElementById('scp-sp-sound-settings')].filter(c => c && c !== container);
-            otherContainers.forEach(c => buildSoundSettingsUI(c));
-            renderDropdown();
-            updateCustomActions();
-        };
-        inp.click();
-    });
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = isSP ? 'scp-action-btn scp-sp-danger-btn' : 'menu_button interactable';
-    deleteBtn.innerHTML = `<i class="fa-solid fa-trash"></i><span>Delete</span>`;
-    if (!isSP) deleteBtn.style.flex = '1';
-
-    deleteBtn.addEventListener('click', async () => {
-        const val = typeSel.value;
-        if (val.startsWith('custom_')) {
-            const ok = await showCustomDialog({ type: 'confirm', title: 'Delete Sound', message: 'Delete this custom sound?' });
-            if (!ok) return;
-            const s2 = getSettings();
-            delete s2.customSounds[val];
-            s2.completionSound = 'none';
-            saveSettings();
-            renderDropdown();
-            updateCustomActions();
-            
-            const otherContainers = [document.getElementById('scp-sound-settings'), document.getElementById('scp-sp-sound-settings')].filter(c => c && c !== container);
-            otherContainers.forEach(c => buildSoundSettingsUI(c));
-        }
-    });
-    
-    customActionsWrap.appendChild(uploadBtn);
-    customActionsWrap.appendChild(deleteBtn);
-    container.appendChild(customActionsWrap);
-
-    const updateCustomActions = () => {
-        deleteBtn.style.display = typeSel.value.startsWith('custom_') ? '' : 'none';
-    };
-    updateCustomActions();
-
-    typeSel.addEventListener('change', () => {
-        getSettings().completionSound = typeSel.value;
-        saveSettings();
-        updateCustomActions();
-        const otherContainers = [document.getElementById('scp-sound-settings'), document.getElementById('scp-sp-sound-settings')].filter(c => c && c !== container);
-        otherContainers.forEach(c => buildSoundSettingsUI(c));
-    });
-
-    const volRow = document.createElement('div');
-    volRow.className = isSP ? 'scp-sp-field' : '';
-    volRow.style.marginTop = isSP ? '6px' : '10px';
-
-    const volLbl = document.createElement(isSP ? 'label' : 'b');
-    volLbl.className = isSP ? 'scp-sp-label' : '';
-    if (!isSP) volLbl.style.fontSize = '12px';
-    volLbl.textContent = 'Volume';
-
-    const volWrap = document.createElement('div');
-    volWrap.className = isSP ? 'scp-sp-row' : '';
-    if (!isSP) {
-        volWrap.style.display = 'flex';
-        volWrap.style.alignItems = 'center';
-        volWrap.style.gap = '10px';
-        volWrap.style.marginTop = '6px';
-    }
-
-    const volSlider = document.createElement('input');
-    volSlider.type = 'range'; 
-    volSlider.className = isSP ? 'scp-slider scp-sp-vol-slider' : 'neo-range-slider scp-sp-vol-slider';
-    volSlider.style.flex = '1'; volSlider.min = '0'; volSlider.max = '100';
-    volSlider.value = s.completionSoundVolume ?? 80;
-
-    const volVal = document.createElement('span');
-    volVal.className = 'scp-sp-vol-val';
-    volVal.style.cssText = isSP 
-        ? 'min-width:32px;text-align:right;font-size:11px;color:var(--scp-accent)' 
-        : 'min-width:34px;text-align:right;font-size:12px;color:var(--SmartThemeQuoteColor,#a99bfb)';
-    volVal.textContent = `${volSlider.value}%`;
-    
-    volSlider.addEventListener('input', () => { volVal.textContent = `${volSlider.value}%`; });
-    volSlider.addEventListener('change', () => { 
-        getSettings().completionSoundVolume = parseInt(volSlider.value); 
-        saveSettings(); 
-        const otherContainers2 = [document.getElementById('scp-sound-settings'), document.getElementById('scp-sp-sound-settings')].filter(c => c && c !== container);
-        otherContainers2.forEach(c => buildSoundSettingsUI(c));
-    });
-    
-    volWrap.appendChild(volSlider); volWrap.appendChild(volVal);
-    volRow.appendChild(volLbl); volRow.appendChild(volWrap);
-    container.appendChild(volRow);
 }
 
 export function buildQPSettingsUI(container) {

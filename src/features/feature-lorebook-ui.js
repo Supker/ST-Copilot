@@ -209,18 +209,28 @@ export async function applyLBChanges(changes, afterMsgId = null) {
         if (change.action === 'add') {
             const uids = Object.keys(data.entries).map(Number);
             const newUid = uids.length ? Math.max(...uids) + 1 : 1;
-            const addTriggers = Array.isArray(change.triggers) ? change.triggers : [];
-            const autoConstant = (addTriggers.length === 0) && change.constant !== false;
+            const isOutlet = !!(change.outlet || change.outlet_name);
+            const outletName = (change.outlet_name || '').trim();
+            const addTriggers = isOutlet ? [] : (Array.isArray(change.triggers) ? change.triggers : []);
+            const autoConstant = !isOutlet && (addTriggers.length === 0) && change.constant !== false;
             data.entries[newUid] = {
-                uid: newUid, key: addTriggers, keysecondary:[],
-                content: change.content || '', comment: change.name || '',
-                disable: false, group: '', selective: false,
-                constant: change.constant === true || autoConstant,
-                position: 0, depth: 4, displayIndex: newUid,
-                prevent_recursion: false, delayUntilRecursion: false,
-                scan_depth: null, match_whole_words: null, use_group_scoring: false,
-                case_sensitive: null, automation_id: '', role: null,
-                vectorized: false, sticky: null, cooldown: null, delay: null,
+                uid: newUid,
+                key: addTriggers,
+                keysecondary: [],
+                content: change.content || '',
+                comment: change.name || '',
+                disable: false,
+                selective: false,
+                constant: !isOutlet && (change.constant === true || autoConstant),
+                position: isOutlet ? 7 : (change.position ?? 0),
+                displayIndex: newUid,
+                automation_id: outletName,
+                outletName: outletName,
+                group: change.group || (isOutlet ? outletName : ''),
+                role: null,
+                extensions: {
+                    outlet_name: outletName
+                }
             };
             bookCache[bookName] = data;
             wiCache[bookName] = data;
@@ -237,6 +247,24 @@ export async function applyLBChanges(changes, afterMsgId = null) {
             }
             if (change.content !== undefined) origEntry.content = change.content;
             if (change.constant !== undefined) origEntry.constant = !!change.constant;
+            if (change.outlet !== undefined || change.outlet_name !== undefined) {
+                const oName = (change.outlet_name || '').trim();
+                if (!origEntry.extensions) origEntry.extensions = {};
+                if (change.outlet || oName) {
+                    origEntry.position = 7;
+                    origEntry.automation_id = oName;
+                    origEntry.outletName = oName;
+                    origEntry.group = oName;
+                    origEntry.constant = false;
+                    origEntry.extensions.outlet_name = oName;
+                } else {
+                    origEntry.position = change.position ?? 0;
+                    origEntry.automation_id = '';
+                    origEntry.outletName = '';
+                    origEntry.group = '';
+                    origEntry.extensions.outlet_name = '';
+                }
+            }
             bookCache[bookName] = data;
             wiCache[bookName] = data;
             successfulChanges.push(change);
@@ -585,6 +613,7 @@ export function renderProposalCard(changes, msgEl) {
                 itemStates[ci] = 'applied'; item.classList.add('scp-lb-item-applied');
                 itemBtns.querySelectorAll('button').forEach(b => { b.disabled = true; });
                 updateCountBadge(); updateFooterBtns(); syncBlockToMessage(); checkAllResolved();
+                toastr.success('[LB] Change applied.', EXT_DISPLAY);
             } catch (err) {
                 toastr.error(`Failed: ${err.message}`, EXT_DISPLAY);
                 applyItemBtn.disabled = false; applyItemBtn.textContent = '✓';
@@ -694,7 +723,32 @@ export function renderProposalCard(changes, msgEl) {
             constCb.type = 'checkbox'; constCb.checked = !!c.constant;
             constCb.addEventListener('change', () => { editableChanges[ci].constant = constCb.checked; });
             constWrap.appendChild(constCb); constWrap.appendChild(Object.assign(document.createElement('span'), { textContent: 'Constant (always inject)' }));
+            
+            const outletWrap = document.createElement('label');
+            outletWrap.className = 'scp-sp-check'; outletWrap.style.marginTop = '6px';
+            const outletCb = document.createElement('input');
+            outletCb.type = 'checkbox'; outletCb.checked = !!c.outlet;
+            outletWrap.appendChild(outletCb); outletWrap.appendChild(Object.assign(document.createElement('span'), { textContent: 'Outlet Entry' }));
+
+            const outletNameRow = document.createElement('div');
+            outletNameRow.className = 'scp-lb-pe-row';
+            outletNameRow.style.display = c.outlet ? 'flex' : 'none';
+            const oNameInp = document.createElement('input');
+            oNameInp.type = 'text'; oNameInp.className = 'scp-lb-pe-input';
+            oNameInp.value = c.outlet_name || '';
+            oNameInp.placeholder = 'Outlet macro name...';
+            oNameInp.addEventListener('input', () => { editableChanges[ci].outlet_name = oNameInp.value; });
+            outletNameRow.innerHTML = '<label class="scp-lb-pe-label">Outlet Name</label>';
+            outletNameRow.appendChild(oNameInp);
+
+            outletCb.addEventListener('change', () => { 
+                editableChanges[ci].outlet = outletCb.checked; 
+                outletNameRow.style.display = outletCb.checked ? 'flex' : 'none';
+            });
+
             editPanel.appendChild(constWrap);
+            editPanel.appendChild(outletWrap);
+            editPanel.appendChild(outletNameRow);
 
             item.appendChild(editPanel);
 
@@ -738,6 +792,7 @@ export function renderProposalCard(changes, msgEl) {
             await applyLBChanges(pending, card.dataset.for);
             itemStates.forEach((s, i) => { if (s === 'pending') { itemStates[i] = 'applied'; itemEls[i].classList.add('scp-lb-item-applied'); itemEls[i].querySelectorAll('button').forEach(b => { b.disabled = true; }); } });
             updateCountBadge(); updateFooterBtns(); checkAllResolved();
+            toastr.success(`[LB] ${pending.length} changes applied.`, EXT_DISPLAY);
         } catch (e) {
             toastr.error(`Failed: ${e.message}`, EXT_DISPLAY);
             applyAllBtn.disabled = false; applyAllBtn.textContent = 'Apply All';
@@ -1066,6 +1121,7 @@ export async function addNewEntry() {
     toastr.success('Entry created', EXT_DISPLAY);
     await renderEntryList(state.lbActiveBook, state.lbSearchQuery);
     showEntryDetail(newEntry, state.lbActiveBook);
+    updateMsgCount(getCurrentSession());
 }
 
 export function updateLBFooterInfo() {

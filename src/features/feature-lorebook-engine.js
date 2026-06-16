@@ -66,6 +66,7 @@ export function getEmbeddedCharBook() {
             position: e.position ?? 0,
             displayIndex: uid,
             automation_id: e.automation_id || e.automationId || '',
+            outletName: e.extensions?.outlet_name || e.outletName || e.outlet_name || e.outlet || '',
             outlet: e.outlet || e.outlet_name || e.outletName || '',
             group: e.group || ''
         };
@@ -230,15 +231,18 @@ export async function buildLorebookContextBlock(settings) {
     const selectedBooks = settings.lorebookSelectedBooks || [];
     const excludedBooks = new Set(settings.lorebookExcludedBooks || []);
     const overrides = settings.lorebookEntryOverrides || {};
-    if (!selectedBooks.length && !settings.lorebookAutoKeyword && !excludedBooks.size) return '';
     const loadedBooks = {};
     const _activeNamesSet = new Set(getActiveLorebookNames());
 
-    await Promise.all(selectedBooks.map(async name => {
-        if (!_activeNamesSet.has(name) || excludedBooks.has(name)) return;
+    if (!_activeNamesSet.size) return '';
+
+    await Promise.all([..._activeNamesSet].map(async name => {
+        if (excludedBooks.has(name)) return;
         const data = await fetchWorldInfoBook(name);
         if (data) loadedBooks[name] = data;
     }));
+
+    if (!Object.keys(loadedBooks).length) return '';
 
     let keywordEntries = {};
     if (settings.lorebookAutoKeyword) {
@@ -277,41 +281,52 @@ export async function buildLorebookContextBlock(settings) {
                 .join('\n');
         } catch (_) {}
 
-        const activeNames = getActiveLorebookNames();
-        await Promise.all(activeNames.map(async name => {
-            if (!loadedBooks[name] && !excludedBooks.has(name)) {
-                const data = await fetchWorldInfoBook(name);
-                if (data) loadedBooks[name] = data;
-            }
-        }));
         keywordEntries = getKeywordTriggeredEntries(loadedBooks, lastUser + '\n' + lastChar, copilotScanText);
     }
 
     const toInject = {};
+    const outletLines = [];
     let overridesChanged = false;
 
-    for (const[bookName, data] of Object.entries(loadedBooks)) {
+    for (const [bookName, data] of Object.entries(loadedBooks)) {
         for (const entry of wiEntriesToArray(data)) {
             if (!entry.content) continue;
-            
+
             const oldKey = `${bookName}_${entry.uid}`;
             const newKey = getEntryOverrideKey(bookName, entry);
-            
+
             if (oldKey !== newKey && overrides[oldKey] !== undefined) {
                 overrides[newKey] = overrides[oldKey];
                 delete overrides[oldKey];
                 overridesChanged = true;
             }
-            
+
             const override = overrides[newKey];
-            
             if (override === false) continue;
-            
+
             const isConstant = !!entry.constant && !entry.disable;
             const manualInclude = selectedBooks.includes(bookName);
             const keywordInclude = keywordEntries[bookName]?.some(e => e.uid === entry.uid);
-            
+
             if (override === true || isConstant || manualInclude || keywordInclude) {
+                const outletField = (entry.outlet || entry.outlet_name || entry.outletName || entry.automation_id || entry.automationId || '').trim();
+                const isOutletPos = String(entry.position).toLowerCase() === 'outlet' || String(entry.position) === '7';
+                const finalOutletName = outletField || (isOutletPos ? (entry.group || '').trim() : '');
+                const isOutlet = isOutletPos || finalOutletName !== '';
+
+                if (isOutlet) {
+                    if (!entry.disable) {
+                        outletLines.push(`- "${entry.comment || `Entry #${entry.uid}`}" (uid: ${entry.uid}, book: "${getDisplayName(bookName)}") → {{outlet::${finalOutletName}}}`);
+                        lastActiveEntries.push({
+                            bookName,
+                            displayName: getDisplayName(bookName),
+                            entryName: entry.comment || `#${entry.uid}`,
+                            uid: entry.uid,
+                        });
+                    }
+                    continue;
+                }
+
                 if (!toInject[bookName]) toInject[bookName] = [];
                 toInject[bookName].push(entry);
             }
@@ -320,29 +335,19 @@ export async function buildLorebookContextBlock(settings) {
 
     if (overridesChanged) saveSettings();
 
-    if (!Object.keys(toInject).length) return '';
+    if (!Object.keys(toInject).length && !outletLines.length) return '';
 
     let block = '\n\n<lorebook_context>\n';
-    for (const[bookName, entries] of Object.entries(toInject)) {
+    for (const [bookName, entries] of Object.entries(toInject)) {
         let hasValidEntries = false;
         let bookBlock = `## ${getDisplayName(bookName)}\n`;
-        
-        for (const e of entries) {
-            const outletField = (e.outlet || e.outlet_name || e.outletName || e.automation_id || e.automationId || '').trim();
-            const isOutletPos = String(e.position).toLowerCase() === 'outlet';
-            const finalOutletName = outletField || (isOutletPos ? (e.group || '').trim() : '');
-            
-            const isOutlet = isOutletPos || finalOutletName !== '';
-            
-            if (isOutlet) {
-                continue;
-            }
 
+        for (const e of entries) {
             hasValidEntries = true;
             bookBlock += `### ${e.comment || `Entry #${e.uid}`} (uid: ${e.uid})`;
             if (e.key?.length) bookBlock += ` [keys: ${e.key.slice(0, 5).join(', ')}]`;
             bookBlock += `\n${e.content}\n\n`;
-            
+
             lastActiveEntries.push({
                 bookName,
                 displayName: getDisplayName(bookName),
@@ -350,13 +355,15 @@ export async function buildLorebookContextBlock(settings) {
                 uid: e.uid,
             });
         }
-        if (hasValidEntries) {
-            block += bookBlock;
-        }
+        if (hasValidEntries) block += bookBlock;
     }
-    
+
+    if (outletLines.length) {
+        block += `## Outlet Entries (injected via {{outlet::name}} macro, not directly)\n${outletLines.join('\n')}\n\n`;
+    }
+
     if (block === '\n\n<lorebook_context>\n') return '';
-    
+
     block += '</lorebook_context>';
     return block;
 }
@@ -631,7 +638,7 @@ export async function expandOutletsAsync(text, depth = 0) {
             const entries = Object.values(book.entries || {});
             for (const e of entries) {
                 const outletField = (e.outlet || e.outlet_name || e.outletName || e.automation_id || e.automationId || '').trim();
-                const isOutletPos = String(e.position) === '5' || String(e.position).toLowerCase() === 'outlet';
+                const isOutletPos = String(e.position) === '7' || String(e.position).toLowerCase() === 'outlet';
                 const finalOutletName = outletField || (isOutletPos ? (e.group || '').trim() : '');
                 
                 if (!e.disable && finalOutletName === searchName) {

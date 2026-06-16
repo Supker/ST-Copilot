@@ -1,8 +1,7 @@
-import { EXT_DISPLAY } from '../constants.js';
+import { EXT_DISPLAY, DEFAULT_MEMORY_PROMPT, MEMORY_FORMAT_BLOCK } from '../constants.js';
 import { getSettings, saveSettings, getCurrentSession, getBindingKey } from '../session.js';
 import { _dbgAdd } from '../utils/util-debug.js';
 import { escHtml, showCustomDialog } from '../utils/util-dom.js';
-import { DEFAULT_MEMORY_PROMPT, MEMORY_FORMAT_BLOCK } from '../constants.js';
 import { _ensureWrapped } from '../utils/util-text.js';
 
 export function genMemoryId() { 

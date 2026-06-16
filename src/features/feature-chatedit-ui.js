@@ -50,7 +50,8 @@ export function renderChatProposalCard(changes, msgEl) {
         regex: '<i class="fa-solid fa-terminal" style="margin-right: 4px;"></i> Regex', 
         delete: '<i class="fa-solid fa-trash" style="margin-right: 4px;"></i> Delete', 
         hide: '<i class="fa-solid fa-eye-slash" style="margin-right: 4px;"></i> Hide', 
-        unhide: '<i class="fa-solid fa-eye" style="margin-right: 4px;"></i> Unhide' 
+        unhide: '<i class="fa-solid fa-eye" style="margin-right: 4px;"></i> Unhide',
+        rename_chat: '<i class="fa-solid fa-tag" style="margin-right: 4px;"></i> Rename Chat' 
     };
     
     const card = document.createElement('div');
@@ -81,6 +82,9 @@ export function renderChatProposalCard(changes, msgEl) {
 
     const validateChatChange = (change) => {
         const stMsgs = SillyTavern.getContext().chat || [];
+        if (change.action === 'rename_chat') {
+            return { valid: !!(change.name && change.name.trim()), reason: 'Chat name cannot be empty' };
+        }
         if (change.action === 'add') {
             if (!['user', 'assistant', 'system'].includes(change.role)) return { valid: false, reason: 'Invalid role' };
             if (change.msg_index < 0 || change.msg_index > stMsgs.length + 1) return { valid: false, reason: 'Index out of bounds' };
@@ -246,7 +250,9 @@ export function renderChatProposalCard(changes, msgEl) {
         const updateTargetDesc = () => {
             const change = editableChanges[ci];
             let targetDesc = '';
-            if (change.action === 'add') {
+            if (change.action === 'rename_chat') {
+                targetDesc = `Current chat`;
+            } else if (change.action === 'add') {
                 targetDesc = `Insert at #${change.msg_index} (${change.role})`;
             } else if (Array.isArray(change.msg_indices) && change.msg_indices.length) {
                 targetDesc = `msgs [${change.msg_indices.join(', ')}]`;
@@ -356,20 +362,36 @@ export function renderChatProposalCard(changes, msgEl) {
             applyBtn.addEventListener('click', async e => {
                 e.stopPropagation();
                 if (itemStates[ci] !== 'pending' || applyBtn.disabled) return;
-                applyBtn.disabled = true; applyBtn.textContent = '…';
+                
+                applyBtn.disabled = true; 
+                applyBtn.textContent = '…';
+                
+                itemStates[ci] = 'applied';
+                item.classList.add('scp-lb-item-applied');
+                btns.querySelectorAll('button').forEach(b => { b.disabled = true; });
+                persistState(); 
+                countBadge.textContent = `${getPending()} pending`; 
+                updateFooterBtns(); 
+                syncBlockToMessage(); 
+
                 try {
                     await module.applyChatChanges([editableChanges[ci]], card.dataset.for);
-                    itemStates[ci] = 'applied';
-                    item.classList.add('scp-lb-item-applied');
-                    btns.querySelectorAll('button').forEach(b => { b.disabled = true; });
-                    persistState(); countBadge.textContent = `${getPending()} pending`; updateFooterBtns(); syncBlockToMessage(); checkAllResolved();
+                    checkAllResolved();
                 } catch(err) {
+                    itemStates[ci] = 'pending';
+                    item.classList.remove('scp-lb-item-applied');
+                    btns.querySelectorAll('button').forEach(b => { b.disabled = false; });
+                    persistState(); 
+                    countBadge.textContent = `${getPending()} pending`; 
+                    updateFooterBtns(); 
+                    syncBlockToMessage(); 
+
                     toastr.error(`Failed: ${err.message}`, EXT_DISPLAY);
-                    applyBtn.disabled = false; applyBtn.textContent = '✓';
+                    applyBtn.disabled = false; 
+                    applyBtn.textContent = '✓';
                 }
             });
         });
-
         const rejectBtn = document.createElement('button');
         rejectBtn.className = 'scp-lb-proposal-item-reject'; rejectBtn.title = 'Reject'; rejectBtn.textContent = '✕';
         rejectBtn.addEventListener('click', e => {
@@ -387,6 +409,7 @@ export function renderChatProposalCard(changes, msgEl) {
 
         const buildPreview = () => {
             const change = editableChanges[ci];
+            if (change.action === 'rename_chat') return `New Name: ${change.name || ''}`;
             if (change.action === 'hide') return 'Exclude message(s) from AI prompt context.';
             if (change.action === 'unhide') return 'Include message(s) back into AI context.';
             if (change.action === 'replace' && change.patches?.length) {
@@ -429,6 +452,15 @@ export function renderChatProposalCard(changes, msgEl) {
             const rebuildEditPanel = () => {
                 editPanel.innerHTML = '';
                 const change = editableChanges[ci];
+                
+                if (change.action === 'rename_chat') {
+                    const nameTa = document.createElement('input');
+                    nameTa.type = 'text'; nameTa.className = 'scp-lb-pe-input';
+                    nameTa.value = change.name || '';
+                    nameTa.addEventListener('input', () => { change.name = nameTa.value; refreshPreview(); });
+                    editPanel.appendChild(mkRow('New Name', nameTa));
+                    return;
+                }
                 
                 if (Array.isArray(change.msg_indices) && change.msg_indices.length) {
                     const idxInp = document.createElement('input');
@@ -602,14 +634,40 @@ export function renderChatProposalCard(changes, msgEl) {
 
     import('./feature-chatedit-engine.js').then(module => {
         applyAllBtn.addEventListener('click', async () => {
-            const pending = editableChanges.filter((_, i) => itemStates[i] === 'pending');
+            const pendingIndices = [];
+            editableChanges.forEach((_, i) => { if (itemStates[i] === 'pending') pendingIndices.push(i); });
+            const pending = pendingIndices.map(i => editableChanges[i]);
             if (!pending.length) return;
             applyAllBtn.disabled = true; applyAllBtn.textContent = 'Applying…';
+            
+            pendingIndices.forEach(i => {
+                itemStates[i] = 'applied';
+                itemEls[i]?.classList.add('scp-lb-item-applied');
+                itemEls[i]?.querySelectorAll('button').forEach(b => { b.disabled = true; });
+            });
+            persistState(); 
+            countBadge.textContent = `${getPending()} pending`; 
+            updateFooterBtns(); 
+            syncBlockToMessage(); 
+
             try {
                 await module.applyChatChanges(pending, card.dataset.for);
-                itemStates.forEach((s, i) => { if (s === 'pending') { itemStates[i] = 'applied'; itemEls[i]?.classList.add('scp-lb-item-applied'); itemEls[i]?.querySelectorAll('button').forEach(b => { b.disabled = true; }); } });
-                persistState(); countBadge.textContent = `${getPending()} pending`; updateFooterBtns(); syncBlockToMessage(); checkAllResolved();
-            } catch(e) { toastr.error(`Failed: ${e.message}`, EXT_DISPLAY); applyAllBtn.disabled = false; applyAllBtn.textContent = 'Apply All'; }
+                checkAllResolved();
+            } catch(e) {
+                pendingIndices.forEach(i => {
+                    itemStates[i] = 'pending';
+                    itemEls[i]?.classList.remove('scp-lb-item-applied');
+                    itemEls[i]?.querySelectorAll('button').forEach(b => { b.disabled = false; });
+                });
+                persistState(); 
+                countBadge.textContent = `${getPending()} pending`; 
+                updateFooterBtns(); 
+                syncBlockToMessage(); 
+                
+                toastr.error(`Failed: ${e.message}`, EXT_DISPLAY);
+                applyAllBtn.disabled = false; 
+                applyAllBtn.textContent = 'Apply All';
+            }
         });
     });
 

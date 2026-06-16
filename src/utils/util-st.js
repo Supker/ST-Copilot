@@ -46,6 +46,8 @@ export function getCharInfo() {
         mes_example: get('mes_example', '{{mesExamples}}'),
         character_note: getCharNote(),
         creator_notes: get('creator_notes'),
+        system_prompt: get('system_prompt'),
+        post_history_instructions: get('post_history_instructions'),
     };
 }
 

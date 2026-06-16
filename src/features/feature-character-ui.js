@@ -204,7 +204,7 @@ export function logCharEditHistory(changes, statusStr, afterMsgId = null) {
     if (!changes?.length) return;
     try {
         const getFieldLabel = (f) => {
-            const LBLS = { tags:'Tags', description:'Description', personality:'Personality', scenario:'Scenario', first_mes:'First Message', mes_example:'Example Dialogue', authors_note:"Author's Note", user_persona:"User Persona", alternate_greetings:'Alternate Greetings' };
+            const LBLS = { name:'Name', tags:'Tags', description:'Description', personality:'Personality', scenario:'Scenario', first_mes:'First Message', mes_example:'Example Dialogue', authors_note:"Author's Note", user_persona:"User Persona", alternate_greetings:'Alternate Greetings', system_prompt:'Main Prompt Override', post_history_instructions:'Post-History Instructions' };
             if (LBLS[f]) return LBLS[f];
             if (f && f.startsWith('evolutia_char:')) return `Aspect (Char): ${f.split('evolutia_char:')[1]}`;
             if (f && f.startsWith('evolutia_user:')) return `Aspect (User): ${f.split('evolutia_user:')[1]}`;
@@ -413,7 +413,7 @@ export function renderCharProposalCard(changes, msgEl) {
     const itemStates = editableChanges.map(() => 'pending');
 
     const getFieldLabel = (f) => {
-        const LBLS = { description:'Description', personality:'Personality', scenario:'Scenario', first_mes:'First Message', mes_example:'Example Dialogue', authors_note:"Author's Note", user_persona:"User Persona", alternate_greetings:'Alternate Greetings' };
+        const LBLS = { name:'Name', tags:'Tags', description:'Description', personality:'Personality', scenario:'Scenario', first_mes:'First Message', mes_example:'Example Dialogue', authors_note:"Author's Note", user_persona:"User Persona", alternate_greetings:'Alternate Greetings', system_prompt:'Main Prompt Override', post_history_instructions:'Post-History Instructions' };
         if (LBLS[f]) return LBLS[f];
         if (f && f.startsWith('evolutia_char:')) return `Aspect (Char): ${f.split('evolutia_char:')[1]}`;
         if (f && f.startsWith('evolutia_user:')) return `Aspect (User): ${f.split('evolutia_user:')[1]}`;
@@ -569,17 +569,33 @@ export function renderCharProposalCard(changes, msgEl) {
             e.stopPropagation();
             if (itemStates[ci] !== 'pending' || applyBtn.disabled) return;
             applyBtn.disabled = true; applyBtn.textContent = '\u2026';
+            
+            const isNameField = editableChanges[ci].field === 'name';
+            if (isNameField) {
+                itemStates[ci] = 'applied';
+                syncBlockToMessage();
+            }
+
             try {
                 await applyCharChanges([editableChanges[ci]], card.dataset.for);
-                itemStates[ci] = 'applied';
+                
+                if (!isNameField) {
+                    itemStates[ci] = 'applied';
+                    syncBlockToMessage();
+                }
+
                 item.classList.add('scp-lb-item-applied');
                 btns.querySelectorAll('button').forEach(b => { b.disabled = true; });
                 persistState(); countBadge.textContent = `${getPending()} pending`; updateFooter(); 
-                syncBlockToMessage();
                 checkAllResolved();
             } catch (err) {
                 toastr.error(`Failed: ${err.message}`, EXT_DISPLAY);
                 applyBtn.disabled = false; applyBtn.textContent = '\u2713';
+                
+                if (isNameField) {
+                    itemStates[ci] = 'pending';
+                    syncBlockToMessage();
+                }
             }
         });
 
@@ -748,18 +764,43 @@ export function renderCharProposalCard(changes, msgEl) {
     updateFooter();
 
     applyAllBtn.addEventListener('click', async () => {
-        const pending = editableChanges.filter((_, i) => itemStates[i] === 'pending');
+        const pendingIndices = [];
+        editableChanges.forEach((_, i) => { if (itemStates[i] === 'pending') pendingIndices.push(i); });
+        const pending = pendingIndices.map(i => editableChanges[i]);
         if (!pending.length) return;
+        
         applyAllBtn.disabled = true; applyAllBtn.textContent = 'Applying\u2026';
+        
+        const hasNameField = pending.some(c => c.field === 'name');
+        if (hasNameField) {
+            pendingIndices.forEach(i => { itemStates[i] = 'applied'; });
+            syncBlockToMessage();
+        }
+
         try {
             await applyCharChanges(pending, card.dataset.for);
-            itemStates.forEach((s, i) => { if (s === 'pending') { itemStates[i] = 'applied'; itemEls[i]?.classList.add('scp-lb-item-applied'); itemEls[i]?.querySelectorAll('button').forEach(b => { b.disabled = true; }); } });
+            
+            if (!hasNameField) {
+                pendingIndices.forEach(i => { itemStates[i] = 'applied'; });
+                syncBlockToMessage();
+            }
+            
+            pendingIndices.forEach(i => {
+                if (itemEls[i]) {
+                    itemEls[i].classList.add('scp-lb-item-applied');
+                    itemEls[i].querySelectorAll('button').forEach(b => { b.disabled = true; });
+                }
+            });
             persistState(); countBadge.textContent = `${getPending()} pending`; updateFooter(); 
-            syncBlockToMessage();
             checkAllResolved();
         } catch (e) {
             toastr.error(`Failed: ${e.message}`, EXT_DISPLAY);
             applyAllBtn.disabled = false; applyAllBtn.textContent = 'Apply All';
+            
+            if (hasNameField) {
+                pendingIndices.forEach(i => { itemStates[i] = 'pending'; });
+                syncBlockToMessage();
+            }
         }
     });
     rejectAllBtn.addEventListener('click', () => {

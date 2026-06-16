@@ -45,6 +45,13 @@ After you generate a proposal, a background script extracts your \`lorebook-chan
 - Anti-Cliché: R Actively reject statistically overused LLM names (e.g., Elara, Kael, Lyra). Invent highly original, phonetically distinct names strictly grounded in the specific setting's culture.
 </content_standards>
 
+<outlet_entries_info>
+Outlet entries (position=5) are reusable content blocks injected wherever {{outlet::outlet_name}} macro appears in other prompts or scenarios. They are NOT directly added to context.
+To create an outlet entry: use "add" action with "outlet":true and "outlet_name":"your_outlet_name".
+To convert an existing entry to outlet: use "edit" with "outlet":true and "outlet_name":"your_outlet_name".
+Active outlet entries are listed in lorebook_context under "Outlet Entries" (if exists).
+</outlet_entries_info>
+
 <modification_protocol>
 - \`add\` / \`delete\`: entry from lorebook.
 - \`prepend\` / \`append\`: Insert text EXACTLY BEFORE or AFTER existing entry content.
@@ -171,6 +178,7 @@ Currently visible messages: {{active_chat_ids}}
 export const LB_FORMAT_BLOCK = `\`\`\`lorebook-changes
 {"changes":[
   {"action":"add","worldName":"BookName","name":"EntryName","triggers":["keyword"],"content":"Entry content","constant":false},
+  {"action":"add","worldName":"BookName","name":"OutletEntry","content":"Outlet content here","outlet":true,"outlet_name":"my_outlet_name"},
   {"action":"delete","worldName":"BookName","uid":123,"name":"EntryName"}
   {"action":"prepend","worldName":"BookName","uid":123,"content":"Text to add at the start"},
   {"action":"append","worldName":"BookName","uid":123,"content":"Text to add at the end"},
@@ -221,6 +229,7 @@ export const CHAR_CREATE_FORMAT_BLOCK = `\`\`\`character-create
 
 export const CHAT_EDIT_FORMAT_BLOCK = `\`\`\`chat-changes
 {"changes":[
+  {"action":"rename_chat","name":"New Chat Display Name"},
   {"action":"prepend","msg_index":6,"content":"Text to add at the start. "},
   {"action":"append","msg_index":6,"content":" Text to add at the end."},
   {"action":"add","msg_index":7,"role":"assistant","content":"Brand new message text"},
@@ -279,6 +288,18 @@ export const TOOL_CALL_FORMAT_BLOCK = `\`\`\`tool_call\n{"name": "tool_name","in
     // ─── Changelog Data ──────────────────────────────────────────────────────────
 export const CHANGELOG = [
     {
+        version: '2.8.2',
+        date: '6/16/2026',
+        announce: true,
+        notes: [
+            '<strong>Character Management</strong> — Copilot can now access and modify Name, Main Prompt Override, and Post-History Instructions.',
+            '<strong>Lorebook API</strong> — Added <code>get_lorebooks</code> tool and upgraded <code>search_lorebook_entries</code> with <code>is_constant</code> and <code>is_outlet</code> parameters.',
+            '<strong>Dynamic Outlets</strong> — Enabled AI autonomy for creating and modifying Lorebook Outlets (requires Lorebook Prompt reset to default).',
+            '<strong>Chat Management</strong> — Added support for renaming the current chat via Proposed Chat Changes.',
+            '<strong>Stability & Tokens</strong> — Fixed critical session deletion bugs, improved token counting accuracy, and optimized save-lock logic.'
+        ],
+    },
+    {
         version: '2.8.1',
         date: '6/15/2026',
         announce: false,
@@ -291,7 +312,7 @@ export const CHANGELOG = [
     {
         version: '2.8.0',
         date: '6/11/2026',
-        announce: true,
+        announce: false,
         notes: [
             '<strong>Tools & Agency</strong> — Copilot can now independently gather information using the new Tools system.',
             '<strong>Persistent Memory</strong> — Introduced cross-session memory with Global, Character, Chat, and Session scoping.',
@@ -659,10 +680,10 @@ export const TOOL_DEFINITIONS = [
         },
         {
             id: 'search_lorebook',
-            name: 'search_lorebook',
-            label: 'Search Lorebook',
+            name: 'search_lorebook_entry',
+            label: 'Search Lorebook Entries',
             icon: 'fa-book',
-            description: 'Search for entries in active lorebooks by name, keyword, or content.',
+            description: 'Search for entries in active lorebooks by name, keyword, or content. Can filter by constant or outlet type.',
             settingKey: 'toolsEnabled_search_lorebook',
             schema: {
                 type: 'object',
@@ -670,8 +691,25 @@ export const TOOL_DEFINITIONS = [
                     query: { type: 'string', description: 'Text to search for in entry names, keys, and content' },
                     book_name: { type: 'string', description: 'Specific lorebook name to search (optional)' },
                     search_in: { type: 'string', enum: ['all', 'name', 'keys', 'content'], description: 'Where to search (default: all)' },
+                    only_constant: { type: 'boolean', description: 'If true, return only constant (always-active) entries' },
+                    only_outlet: { type: 'boolean', description: 'If true, return only outlet entries (injected via {{outlet::name}} macro)' },
                 },
                 required: ['query'],
+            },
+        },
+        {
+            id: 'get_lorebooks',
+            name: 'get_lorebooks',
+            label: 'Get Lorebooks',
+            icon: 'fa-book-open',
+            description: 'Get all active lorebook names. Optionally list entry names and types for each book.',
+            settingKey: 'toolsEnabled_get_lorebooks',
+            schema: {
+                type: 'object',
+                properties: {
+                    include_entries: { type: 'boolean', description: 'If true, include entry names/types for each lorebook' },
+                    book_name: { type: 'string', description: 'When include_entries is true, limit to this specific lorebook (optional)' },
+                },
             },
         },
         {
