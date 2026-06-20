@@ -1,6 +1,7 @@
 import { EXT_DISPLAY, I } from '../constants.js';
 import { getSettings, saveSettings, getCurrentSession, addMessage, saveSessionsToMetadata } from '../session.js';
 import { escHtml } from '../utils/util-dom.js';
+import { bringWindowToFront } from '../ui/ui-window.js';
 import { applySearchReplaceToField } from '../utils/util-text.js';
 import { getCharFieldValue, saveCharacterField, stripCharCreationBlock, stripCharChangesBlock, createCharacterAPI } from './feature-character-engine.js';
 import { openTextDiffModal } from '../utils/util-diff.js';
@@ -401,6 +402,7 @@ export function renderCharCreationCard(creationData, msgEl) {
     const bodyEl = msgEl.querySelector('.scp-msg-body');
     if (bodyEl) bodyEl.insertBefore(card, bodyEl.querySelector('.scp-swipe-bar'));
     else msgEl.after(card);
+    bringWindowToFront();
 }
 
 export function renderCharProposalCard(changes, msgEl) {
@@ -817,4 +819,5 @@ export function renderCharProposalCard(changes, msgEl) {
     const body = msgEl.querySelector('.scp-msg-body');
     if (body) body.insertBefore(card, body.querySelector('.scp-swipe-bar'));
     else msgEl.after(card);
+    bringWindowToFront();
 }

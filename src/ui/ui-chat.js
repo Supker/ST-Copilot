@@ -1604,6 +1604,7 @@ export function openChatPicker() {
     _pickerLastIdx = -1;
     renderPickerMessages();
     overlay.style.display = 'flex';
+    if (uiWinMod) uiWinMod.bringWindowToFront();
 }
 
 export function closeChatPicker() {

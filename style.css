@@ -537,8 +537,10 @@
     width: 100%; background: var(--scp-input-bg); border: 1px solid var(--scp-accent-dim);
     border-radius: 6px; color: var(--scp-text); font-family: var(--scp-font);
     font-size: 13px; line-height: 1.5; padding: 8px 10px;
-    resize: none; outline: none; box-sizing: border-box;
-    min-height: 60px; transition: border-color 0.15s;
+    resize: vertical;
+    outline: none; box-sizing: border-box;
+    min-height: 60px; max-height: 600px;
+    transition: border-color 0.15s;
 }
 .scp-edit-ta:focus { border-color: var(--scp-accent); }
 
@@ -1831,6 +1833,7 @@ details.scp-reasoning-block[open] .scp-reasoning-summary::before { transform: ro
 .scp-lb-src-character { background: var(--scp-accent-bg); color: var(--scp-accent); border: 1px solid var(--scp-accent-dim); }
 .scp-lb-src-chat { background: rgba(255,180,50,0.15); color: #ffb432; border: 1px solid rgba(255,180,50,0.3); }
 .scp-lb-src-embedded { background: rgba(255,255,255,0.06); color: var(--scp-text-muted); border: 1px solid rgba(255,255,255,0.1); }
+.scp-lb-src-persona { background: rgba(168,85,247,0.15); color: #a855f7; border: 1px solid rgba(168,85,247,0.3); }
 
 /* ── LB Main Panel ───────────────────────────────────────────── */
 .scp-lb-main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
@@ -4782,27 +4785,61 @@ details.scp-cl-entry[open] .scp-cl-entry-summary::before { transform: rotate(90d
     content: ''; position: absolute; left: -13px; width: 2px;
     background: var(--scp-accent-dim); opacity: 0.4; z-index: 0;
 }
-.scp-tc-chain-start::before { top: 15px; bottom: -18px; }
+.scp-tc-chain-start::before { top: 18px; bottom: -18px; }
 .scp-tc-chain-mid::before { top: -12px; bottom: -18px; }
-.scp-tc-chain-end::before { top: -12px; bottom: calc(100% - 15px); }
+.scp-tc-chain-end::before { top: -12px; bottom: calc(100% - 18px); }
 .scp-tc-chain-start.scp-tc-chain-end::before { display: none; }
 .scp-inline-tool-call::after {
-    content: ''; position: absolute; left: -17px; top: 10px;
+    content: ''; position: absolute; left: -17px; top: 13px;
     width: 10px; height: 10px; border-radius: 50%;
     background: var(--scp-bg); border: 2px solid var(--scp-accent);
     box-shadow: 0 0 6px var(--scp-accent-dim); z-index: 1; box-sizing: border-box;
 }
 .scp-tool-call-header { padding: 8px 12px !important; display: flex; align-items: center; gap: 10px; }
-.scp-tool-call-icon { 
-    width: 20px !important; height: 20px !important; font-size: 10px !important; 
-    border-radius: 6px !important; background: var(--scp-accent-bg) !important;
-    border: 1px solid var(--scp-accent-dim) !important; color: var(--scp-accent);
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
 .scp-tool-call-name { 
     font-size: 11px !important; font-weight: 600 !important; letter-spacing: 0.02em;
     text-transform: uppercase; opacity: 0.95; flex: 1; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.scp-tool-call-icon { 
+    width: 20px !important; 
+    height: 20px !important; 
+    border-radius: 6px !important; 
+    background: var(--scp-accent-bg) !important;
+    border: 1px solid var(--scp-accent-dim) !important; 
+    color: var(--scp-accent);
+    display: flex !important; 
+    align-items: center !important; 
+    justify-content: center !important; 
+    flex-shrink: 0 !important;
+    box-sizing: border-box !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.scp-tool-call-icon i,
+.scp-tool-call-icon span,
+.scp-tool-call-icon svg {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 11px !important;
+    line-height: 1 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    text-align: center !important;
+    transform: none !important;
+    position: static !important;
+    letter-spacing: 0 !important;
+}
+
+.scp-tool-call-icon i::before {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    line-height: 1 !important;
 }
 .scp-tool-call-status { 
     font-size: 9px !important; font-weight: 700 !important; text-transform: uppercase;

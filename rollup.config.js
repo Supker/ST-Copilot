@@ -19,6 +19,6 @@ export default {
         '/scripts/extensions/regex/engine.js'
     ],
     plugins: [
-        terser()
+        // terser()
     ]
 };

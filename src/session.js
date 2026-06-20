@@ -7,6 +7,7 @@ import {
     THEME_PRESETS 
 } from './constants.js';
 import { _dbgAdd, _dbgDiffSettings } from './utils/util-debug.js';
+import { _repairJSON } from './utils/util-text.js';
 
 // ─── Settings ───────────────────────────────────────────────────────────────
 export function getSettings() {
@@ -228,6 +229,18 @@ window.addEventListener('beforeunload', () => {
     }
 });
 
+function _decodeBase64Utf8(b64) {
+    return decodeURIComponent(escape(atob(b64)));
+}
+
+function _tryParseSessionPayload(text) {
+    try { return JSON.parse(text); } catch (_) {}
+    try { return JSON.parse(_decodeBase64Utf8(text)); } catch (_) {}
+    try { return JSON.parse(_repairJSON(text)); } catch (_) {}
+    try { return JSON.parse(_repairJSON(_decodeBase64Utf8(text))); } catch (_) {}
+    return undefined;
+}
+
 export async function loadSessionFile(file_id) {
     try {
         const res = await fetch(`/user/files/${file_id}`);
@@ -243,7 +256,9 @@ export async function loadSessionFile(file_id) {
             return null;
         }
 
-        return JSON.parse(trimmed);
+        const parsed = _tryParseSessionPayload(trimmed);
+        if (parsed === undefined) throw new Error('Unrecoverable payload after base64/repair fallback');
+        return parsed;
     } catch (e) {
         _dbgAdd('STORAGE_LOAD_ERROR', { file_id, error: e.message });
         console.error(`[${EXT_DISPLAY}] loadSessionFile error:`, e);
@@ -251,11 +266,23 @@ export async function loadSessionFile(file_id) {
     }
 }
 
-export async function initChatBucket() {
+export async function initChatBucket({ forceReset = false } = {}) {
     const ctx = SillyTavern.getContext();
     if (!ctx.chatMetadata) ctx.chatMetadata = {};
     const { charId, chatId } = getBindingKey();
-    
+
+    if (forceReset) {
+        const prevMeta = ctx.chatMetadata.st_copilot || null;
+        const freshId = `copilot_sess_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.json`;
+        ctx.chatMetadata.st_copilot = { format: 'v4', file_id: freshId, chat_id: chatId };
+        if (typeof ctx.saveMetadata === 'function') ctx.saveMetadata();
+        _currentSessionFileId = freshId;
+        _inMemoryBucket = { activeSessionId: null, sessions: [] };
+        await commitBucketChanges(true);
+        _dbgAdd('SESSION_FORCE_RESET', { charId, chatId, prevFileId: prevMeta?.file_id || null, newFileId: freshId });
+        return;
+    }
+
     for (const [fileId, item] of _saveQueue.entries()) {
         clearTimeout(item.timer);
         _saveQueue.delete(fileId);
@@ -313,29 +340,34 @@ export async function initChatBucket() {
     _currentSessionFileId = targetFileId;
 
     if (payload === false) {
-        _dbgAdd('STORAGE_READONLY_LOCK_ACTIVATED', { fileId: targetFileId });
-        toastr.error('Failed to load Copilot session. Overwrites blocked to prevent data loss.', EXT_DISPLAY);
-        _inMemoryBucket = { activeSessionId: null, sessions: [], _readOnlyLock: true };
+        _dbgAdd('STORAGE_LOAD_CORRUPTED_RECOVERY', { brokenFileId: targetFileId, charId, chatId });
+        const recoveryFileId = `copilot_sess_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.json`;
+        ctx.chatMetadata.st_copilot = { format: 'v4', file_id: recoveryFileId, chat_id: chatId, recoveredFrom: targetFileId };
+        if (typeof ctx.saveMetadata === 'function') ctx.saveMetadata();
+
+        targetFileId = recoveryFileId;
+        _inMemoryBucket = { activeSessionId: null, sessions: [] };
+        _currentSessionFileId = targetFileId;
+        await commitBucketChanges(true);
+
+        toastr.error('Copilot session file was corrupted and could not be recovered. Started a fresh session storage for this chat; the broken file was kept on disk for manual recovery.', EXT_DISPLAY, { timeOut: 15000 });
         return;
     }
 
     if (payload && payload.bucket) {
         _inMemoryBucket = payload.bucket;
+        _dbgAdd('STORAGE_BUCKET_LOADED', { charId, chatId, fileId: targetFileId, sessionCount: _inMemoryBucket.sessions?.length || 0 });
     } else {
         _inMemoryBucket = { activeSessionId: null, sessions: [] };
+        _dbgAdd('STORAGE_BUCKET_EMPTY_INIT', { charId, chatId, fileId: targetFileId, hadPayload: !!payload });
     }
-
+    
     if (!payload || meta?.format !== 'v4') {
         await commitBucketChanges(true);
     }
 }
 
 export async function commitBucketChanges(force = false) {
-    if (_inMemoryBucket._readOnlyLock) {
-        _dbgAdd('STORAGE_WRITE_BLOCKED_BY_LOCK', { fileName: _currentSessionFileId });
-        return;
-    }
-
     const fileName = _currentSessionFileId;
     if (!fileName) return;
 

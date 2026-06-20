@@ -4,6 +4,7 @@ import { escHtml } from '../utils/util-dom.js';
 import { applySearchReplaceToField } from '../utils/util-text.js';
 import { openTextDiffModal } from '../utils/util-diff.js';
 import { stripChatChangesBlock, reconstructChatChangesBlock, _resolveStMsgByIndexOrId } from './feature-chatedit-engine.js';
+import { bringWindowToFront } from '../ui/ui-window.js';
 
 import { addHistoryToSwipe, _renderMsgBodyContent } from '../ui/ui-chat.js';
 import { appendLBHistoryEl } from './feature-lorebook-ui.js';
@@ -683,4 +684,5 @@ export function renderChatProposalCard(changes, msgEl) {
     const body = msgEl.querySelector('.scp-msg-body');
     if (body) body.insertBefore(card, body.querySelector('.scp-swipe-bar'));
     else msgEl.after(card);
+    bringWindowToFront();
 }

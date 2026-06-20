@@ -4,7 +4,7 @@ import { getSettings, saveSettings, initChatBucket, getChatBucket, setActiveSess
 import { _dbgSetupGlobalErrorHandlers, _dbgAdd, dbgDownload, _dbgSnapshotSettings } from './utils/util-debug.js';
 import { showCustomDialog, escHtml, autoResize, copyText } from './utils/util-dom.js';
 
-import { restoreWindowState, applyCustomTheme, applyWindowBackground, hideWindow, showWindow, minimize, toggleVisibility, makeDraggable, makeResizable, makeIconDraggable, updateIconVisibility, toggleGhostMode, setupGhostHotkey, setupHotkey } from './ui/ui-window.js';
+import { restoreWindowState, applyCustomTheme, applyWindowBackground, hideWindow, showWindow, minimize, toggleVisibility, makeDraggable, makeResizable, makeIconDraggable, updateIconVisibility, toggleGhostMode, setupGhostHotkey, setupHotkey, bringWindowToFront } from './ui/ui-window.js';
 import { setupSettingsPanelListeners, setupSettingsHandlers, updateSettingsUI, updateProfilesList, updateSPConnProfileList, _takeProfileSnapshot, openSettingsPanel, syncOverlayUI } from './ui/ui-settings.js';
 import { setupLorebookManagerListeners, openLorebookManager } from './features/feature-lorebook-ui.js';
 import { updateMemoryDot } from './features/feature-memory.js';
@@ -516,6 +516,7 @@ async function init() {
     }
     
     updateIconVisibility(document.getElementById(ICON_ID));
+    bringWindowToFront();
     
     await onChatChanged();
     refreshSessionDropdown();

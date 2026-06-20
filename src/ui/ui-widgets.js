@@ -76,7 +76,7 @@ export function showQPIconPicker(anchorEl, currentIcon, onSelect) {
     document.body.appendChild(pop);
     _qpIconPickerEl = pop;
     const rect = anchorEl.getBoundingClientRect();
-    pop.style.cssText = `position:fixed;z-index:999999;top:${rect.bottom + 4}px;left:${rect.left}px`;
+    pop.style.cssText = `position:fixed;z-index:2147483060;top:${rect.bottom + 4}px;left:${rect.left}px`;
     requestAnimationFrame(() => {
         const pr = pop.getBoundingClientRect();
         if (pr.right > window.innerWidth - 8) pop.style.left = `${window.innerWidth - pr.width - 8}px`;
@@ -186,7 +186,7 @@ export function openPresetDropdown(triggerEl, groups, onSelect, opts = {}) {
     document.body.appendChild(panel);
 
     const rect = triggerEl.getBoundingClientRect();
-    panel.style.cssText += `;position:fixed;z-index:999999;top:${rect.bottom + 5}px;left:${rect.left}px;max-width:calc(100vw - 16px)`;
+    panel.style.cssText += `;position:fixed;z-index:2147483060;top:${rect.bottom + 5}px;left:${rect.left}px;max-width:calc(100vw - 16px)`;
     requestAnimationFrame(() => {
         const pr = panel.getBoundingClientRect();
         if (pr.right > window.innerWidth - 8) panel.style.left = `${window.innerWidth - pr.width - 8}px`;
@@ -591,6 +591,7 @@ export function openChangelog() {
     const body = document.getElementById('scp-changelog-body');
     if (body) body.innerHTML = buildChangelogHTML();
     modal.style.display = 'flex';
+    import('./ui-window.js').then(m => m.bringWindowToFront());
 }
 
 export function closeChangelog() {
@@ -898,6 +899,7 @@ export async function openInspector() {
     }
     if (jsonEl) jsonEl.textContent = JSON.stringify(messages, null, 2);
     modalEl.style.display = 'flex';
+    import('./ui-window.js').then(m => m.bringWindowToFront());
     
     setTimeout(() => {
         const isJsonActive = document.querySelector('.scp-modal-tab.active')?.dataset.tab === 'json';

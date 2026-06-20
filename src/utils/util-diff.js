@@ -193,4 +193,5 @@ export function openTextDiffModal(title, originalText, newText) {
         };
     });
     modal.style.display = 'flex';
+    import('../ui/ui-window.js').then(m => m.bringWindowToFront());
 }

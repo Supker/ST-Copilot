@@ -124,6 +124,12 @@ A fully integrated, highly detailed theme editor.
 ---
 
 ## 📜 Changelog History
+### V2.8.3
+*   **Multi-Query Search:** Enhanced search tools to support multiple queries at once, improving the efficiency of information gathering.
+*   **Session & Lorebook Stability:** Fixed critical session deletion bugs and resolved an issue where proposed lorebook changes would persist after being applied.
+*   **World Info Drawer:** Patched several bugs in the extension (Special thanks to @Haruny for their time and effort in debugging).
+*   **UI/UX Improvements:** Restored missing lorebook source icons and fixed various display/layout issues for a cleaner experience.
+
 ### V2.8.2
 *   **Character Management:** Expanded AI capabilities to read and modify Character Name, Main Prompt Override, and Post-History Instructions.
 *   **Lorebook Tools:** Introduced `get_lorebooks` and enhanced `search_lorebook_entries` with `is_constant` and `is_outlet` parameters.

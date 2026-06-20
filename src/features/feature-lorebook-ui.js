@@ -7,7 +7,7 @@ import { fetchWorldInfoBook, saveWorldInfoBook, wiEntriesToArray, getDisplayName
 import { applySearchReplaceToField } from '../utils/util-text.js';
 import { openTextDiffModal } from '../utils/util-diff.js';
 
-import { applyCustomTheme } from '../ui/ui-window.js';
+import { applyCustomTheme, bringWindowToFront } from '../ui/ui-window.js';
 import { updateMsgCount, scrollToBottom, _renderMsgBodyContent, addHistoryToSwipe } from '../ui/ui-chat.js';
 import { recordStat, SM } from './feature-stats.js';
 
@@ -368,7 +368,7 @@ export function renderProposalCard(changes, msgEl) {
 
     const getPendingCount = () => itemStates.filter(s => s === 'pending').length;
     const getAppliedCount = () => itemStates.filter(s => s === 'applied').length;
-    const checkAllResolved = () => { if (getPendingCount() === 0) card.remove(); };
+    const checkAllResolved = () => { if (getPendingCount() === 0) { syncBlockToMessage(); card.remove(); } };
 
     const header = document.createElement('div');
     header.className = 'scp-lb-proposal-header';
@@ -388,6 +388,7 @@ export function renderProposalCard(changes, msgEl) {
         const dismissedChanges = editableChanges.filter((_, i) => itemStates[i] === 'pending');
         _dbgAdd('LB_PROPOSAL_ACTION', { action: 'dismissed', msgId: card.dataset.for, dismissedCount: dismissedChanges.length });
         if (dismissedChanges.length > 0) logLBHistoryChanges(dismissedChanges, 'Dismissed', card.dataset.for);
+        itemStates.forEach((s, i) => { if (s === 'pending') itemStates[i] = 'dismissed'; });
         syncBlockToMessage(); card.remove();
     });
 
@@ -817,6 +818,7 @@ export function renderProposalCard(changes, msgEl) {
     const body = msgEl.querySelector('.scp-msg-body');
     if (body) body.insertBefore(card, body.querySelector('.scp-swipe-bar'));
     else msgEl.after(card);
+    bringWindowToFront();
 }
 
 export async function openLorebookManager() {
@@ -825,6 +827,7 @@ export async function openLorebookManager() {
     _dbgAdd('LB_UI_OPEN');
     applyCustomTheme(getSettings().customTheme || THEME_PRESETS.default);
     overlay.style.display = 'flex';
+    bringWindowToFront();
     const s = getSettings();
     if (document.getElementById('scp-lb-search')) document.getElementById('scp-lb-search').value = state.lbSearchQuery;
     
@@ -867,11 +870,69 @@ export async function refreshLorebookList() {
     const activeNamesArray = getActiveLorebookNames();
     const s = getSettings();
     listEl.innerHTML = '';
+    
     if (!activeNamesArray.length) {
         listEl.innerHTML = '<div class="scp-lb-loading">No active lorebooks found.<br><small style="opacity:.5">Link one to the character or select globally.</small></div>';
         return;
     }
+    
     await Promise.all(activeNamesArray.map(name => fetchWorldInfoBook(name)));
+    
+    const { ST_WorldInfo, ST_Utils } = await import('../index.js');
+    
+    // (G)
+    const globalBooks = ST_WorldInfo?.selected_world_info || (ctx.worldInfoSettings?.globalSelect || []);
+        
+    // (Ch)
+    const chatMetadata = window.chat_metadata || ctx.chatMetadata || {};
+    const chatBook = chatMetadata.world_info || null;
+
+    // (P)
+    const pu = window.power_user || ctx.powerUserSettings || {};
+    let personaBook = pu.persona_description_lorebook || null;
+    if (!personaBook) {
+        let personaId = window.user_avatar || ctx.user_avatar || ctx.userAvatar || ctx.personaId || ctx.activePersonaId || ctx.active_persona_id;
+        if (typeof personaId === 'object' && personaId !== null) personaId = personaId.avatarId || personaId.id;
+        if (personaId && pu.persona_descriptions?.[personaId]?.lorebook) {
+            personaBook = pu.persona_descriptions[personaId].lorebook;
+        }
+    }
+
+    //(C) - Primary + Additional
+    const charBooks = new Set();
+    const chars = window.characters || ctx.characters || [];
+    
+    chars.forEach((char, idx) => {
+        if (!char) return;
+        
+        if (char.data?.extensions?.world) {
+            charBooks.add(char.data.extensions.world);
+        }
+        
+        if (ST_WorldInfo?.world_info?.charLore && Array.isArray(ST_WorldInfo.world_info.charLore)) {
+            let fileName = char.avatar ? char.avatar.replace(/\.[^/.]+$/, '') : null;
+            if (ST_Utils && typeof ST_Utils.getCharaFilename === 'function') {
+                fileName = ST_Utils.getCharaFilename(idx);
+            }
+            
+            const charLore = ST_WorldInfo.world_info.charLore.find(e => e.name === fileName);
+            if (charLore && Array.isArray(charLore.extraBooks)) {
+                charLore.extraBooks.forEach(b => charBooks.add(b));
+            }
+        }
+    });
+
+    const getSourceInfo = (name) => {
+        if (name === EMBEDDED_BOOK_KEY) return { cls: 'scp-lb-src-character', label: 'C', title: 'Embedded Character Lorebook' };
+        
+        if (name === chatBook) return { cls: 'scp-lb-src-chat', label: 'Ch', title: 'Chat Lorebook' };
+        if (name === personaBook) return { cls: 'scp-lb-src-persona', label: 'P', title: 'Persona Lorebook' };
+        if (charBooks.has(name)) return { cls: 'scp-lb-src-character', label: 'C', title: 'Character Lorebook (Primary or Additional)' };
+        if (globalBooks.includes(name)) return { cls: 'scp-lb-src-global', label: 'G', title: 'Global Lorebook' };
+
+        return { cls: 'scp-lb-src-global', label: 'G', title: 'Global Lorebook' };
+    };
+
     const frag = document.createDocumentFragment();
     for (const name of activeNamesArray) {
         const displayName = getDisplayName(name);
@@ -880,20 +941,26 @@ export async function refreshLorebookList() {
         const item = document.createElement('div');
         item.className = `scp-lb-book-item${isSelected ? ' selected' : ''}${isExcluded ? ' lb-excluded' : ''}${state.lbActiveBook === name ? ' lb-book-open' : ''}`;
         item.dataset.name = name;
+        
         const cached = wiCache[name];
         const entryCount = cached ? Object.keys(cached.entries || {}).length : '…';
-        const isEmbedded = name === EMBEDDED_BOOK_KEY;
-        const srcType = 'manual';
-        const srcLabel = '';
+        
+        const srcInfo = getSourceInfo(name);
         const checkState = isSelected ? 'checked' : isExcluded ? 'excluded' : '';
+        
         item.innerHTML = `
             <div class="scp-lb-book-check${checkState ? ' ' + checkState : ''}" data-book="${escHtml(name)}"></div>
-            <div class="scp-lb-book-info"><span class="scp-lb-book-name">${escHtml(displayName)}</span><span class="scp-lb-book-meta">${entryCount} entries</span></div>
-            <span class="scp-lb-book-active-dot"></span>`;
+            <div class="scp-lb-book-info">
+                <span class="scp-lb-book-name">${escHtml(displayName)}</span>
+                <span class="scp-lb-book-meta">${entryCount} entries</span>
+            </div>
+            <span class="scp-lb-src-badge ${srcInfo.cls}" title="${srcInfo.title}" style="margin-left: auto;">${srcInfo.label}</span>`;
+            
         item.querySelector('.scp-lb-book-check').addEventListener('click', e => { e.stopPropagation(); toggleLorebookSelection(name); });
         item.addEventListener('click', () => viewLorebookEntries(name));
         frag.appendChild(item);
     }
+    
     listEl.appendChild(frag);
     updateLBFooterInfo();
 }
@@ -1127,9 +1194,13 @@ export async function addNewEntry() {
 export function updateLBFooterInfo() {
     const el = document.getElementById('scp-lb-footer-info');
     if (!el) return;
+    
+    const activeNames = getActiveLorebookNames() || [];
     const s = getSettings();
-    const count = (s.lorebookSelectedBooks || []).length;
-    const excCount = (s.lorebookExcludedBooks || []).length;
+    
+    const count = (s.lorebookSelectedBooks || []).filter(b => activeNames.includes(b)).length;
+    const excCount = (s.lorebookExcludedBooks || []).filter(b => activeNames.includes(b)).length;
+    
     const kwOn = s.lorebookAutoKeyword;
     const parts = [];
     if (count) parts.push(`${count} book${count !== 1 ? 's' : ''} selected`);

@@ -32,6 +32,7 @@ export function showCustomDialog({ type = 'alert', title = '', message = '', htm
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.className = 'scp-dialog-overlay';
+        overlay.style.zIndex = '2147483050';
         const isPrompt = type === 'prompt';
         const isConfirm = type === 'confirm';
         overlay.innerHTML = `

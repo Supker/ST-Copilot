@@ -68,7 +68,34 @@ export function getEmbeddedCharBook() {
             automation_id: e.automation_id || e.automationId || '',
             outletName: e.extensions?.outlet_name || e.outletName || e.outlet_name || e.outlet || '',
             outlet: e.outlet || e.outlet_name || e.outletName || '',
-            group: e.group || ''
+            group: e.group || '',
+            role: e.role ?? null,
+            extensions: e.extensions || {},
+            order: e.order ?? 100,
+            probability: e.probability ?? 100,
+            groupWeight: e.groupWeight ?? 100,
+            depth: e.depth ?? 4,
+            useProbability: e.useProbability ?? true,
+            addMemo: e.addMemo ?? true,
+            groupOverride: e.groupOverride ?? false,
+            sticky: e.sticky ?? 0,
+            cooldown: e.cooldown ?? 0,
+            delay: e.delay ?? 0,
+            excludeRecursion: e.excludeRecursion ?? false,
+            preventRecursion: e.preventRecursion ?? false,
+            delayUntilRecursion: e.delayUntilRecursion ?? false,
+            ignoreBudget: e.ignoreBudget ?? false,
+            vectorized: e.vectorized ?? false,
+            scanDepth: e.scanDepth ?? null,
+            caseSensitive: e.caseSensitive ?? null,
+            matchWholeWords: e.matchWholeWords ?? null,
+            useGroupScoring: e.useGroupScoring ?? null,
+            matchPersonaDescription: e.matchPersonaDescription ?? false,
+            matchCharacterDescription: e.matchCharacterDescription ?? false,
+            matchCharacterPersonality: e.matchCharacterPersonality ?? false,
+            matchCharacterDepthPrompt: e.matchCharacterDepthPrompt ?? false,
+            matchScenario: e.matchScenario ?? false,
+            matchCreatorNotes: e.matchCreatorNotes ?? false
         };
     });
     return data;
@@ -316,7 +343,7 @@ export async function buildLorebookContextBlock(settings) {
 
                 if (isOutlet) {
                     if (!entry.disable) {
-                        outletLines.push(`- "${entry.comment || `Entry #${entry.uid}`}" (uid: ${entry.uid}, book: "${getDisplayName(bookName)}") → {{outlet::${finalOutletName}}}`);
+                        outletLines.push(`### ${entry.comment || `Entry #${entry.uid}`} (uid: ${entry.uid}, book: "${getDisplayName(bookName)}") [outlet name: ${finalOutletName}]\n${entry.content}`);
                         lastActiveEntries.push({
                             bookName,
                             displayName: getDisplayName(bookName),
@@ -359,7 +386,7 @@ export async function buildLorebookContextBlock(settings) {
     }
 
     if (outletLines.length) {
-        block += `## Outlet Entries (injected via {{outlet::name}} macro, not directly)\n${outletLines.join('\n')}\n\n`;
+        block += `## Outlet Entries (injected only where an outlet::<name> macro is manually placed elsewhere, not directly)\n${outletLines.join('\n\n')}\n\n`;
     }
 
     if (block === '\n\n<lorebook_context>\n') return '';

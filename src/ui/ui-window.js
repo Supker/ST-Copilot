@@ -3,6 +3,29 @@ import { state } from '../state.js';
 import { THEME_CSS_MAP, THEME_PRESETS, ICON_STORAGE_KEY, WIN_ID, EXT_DISPLAY } from '../constants.js';
 import { scrollToBottom } from './ui-chat.js';
 
+const SCP_TOP_Z_INDEX = 2147483000;
+
+export function bringWindowToFront() {
+    const targets = Array.from(document.body.children).filter(el =>
+        el.id?.startsWith('scp-') || el.classList?.contains('scp-dialog-overlay')
+    );
+    
+    const getLayer = (el) => {
+        if (el.classList?.contains('scp-dialog-overlay')) return 50;
+        if (el.id?.endsWith('-modal')) return 40;
+        if (el.id?.endsWith('-overlay')) return 30;
+        if (el.id === 'scp-dock-icon') return 20;
+        return 10;
+    };
+
+    targets.sort((a, b) => getLayer(a) - getLayer(b));
+
+    for (const el of targets) {
+        el.style.zIndex = String(SCP_TOP_Z_INDEX + getLayer(el));
+        document.body.appendChild(el);
+    }
+}
+
 export function makeDraggable(handle, target) {
     let active = false, ox = 0, oy = 0, sl = 0, st = 0;
     let _rafId = null;
@@ -625,6 +648,7 @@ export function restoreFromMinimize() {
     saveSettings(); 
     updateIconVisibility(iconEl);
     scrollToBottom(); 
+    bringWindowToFront();
 }
 
 export function hideWindow() { 
@@ -653,6 +677,7 @@ export function showWindow() {
     saveSettings(); 
     updateIconVisibility(iconEl);
     scrollToBottom();
+    bringWindowToFront();
 }
 
 export function toggleVisibility() {

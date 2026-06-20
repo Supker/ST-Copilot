@@ -23,33 +23,40 @@ export async function executeTool(toolName, toolInput) {
     switch (toolName) {
         case 'search_chat': {
             const msgs = ctx.chat || [];
-            const query = toolInput.query || '';
+            let rawQueries = Array.isArray(toolInput.queries) ? toolInput.queries : (Array.isArray(toolInput.query) ? toolInput.query : [toolInput.query || '']);
+            const parsedQueries = rawQueries.map(q => {
+                const s = String(q);
+                const regexMatch = s.match(/^\/(.+)\/([gimsuy]*)$/);
+                if (regexMatch) {
+                    try { return { type: 'regex', re: new RegExp(regexMatch[1], regexMatch[2]) }; } catch(_) {}
+                }
+                return { type: 'text', lq: s.toLowerCase() };
+            });
             const role = toolInput.role || 'all';
             const fromIdx = toolInput.from_index ?? 0;
             const toIdx = toolInput.to_index ?? msgs.length - 1;
             const maxResults = Math.min(toolInput.max_results ?? 10, 50);
             const includeContent = toolInput.include_content !== false;
-            let isRegex = false, re = null;
-            const regexMatch = query.match(/^\/(.+)\/([gimsuy]*)$/);
-            if (regexMatch) {
-                try { re = new RegExp(regexMatch[1], regexMatch[2]); isRegex = true; } catch(_) {}
-            }
+            
             const results = [];
-            const lq = query.toLowerCase();
             for (let i = Math.max(0, fromIdx); i <= Math.min(msgs.length - 1, toIdx); i++) {
                 const m = msgs[i];
                 if (role === 'user' && !m.is_user) continue;
                 if (role === 'assistant' && m.is_user) continue;
                 const text = m.mes || '';
+                
                 let matched = false;
-                if (isRegex && re) { re.lastIndex = 0; matched = re.test(text); }
-                else {
-                    matched = text.toLowerCase().includes(lq);
-                    if (!matched) {
-                        const tokens = lq.split(/\s+/).filter(Boolean);
-                        if (tokens.length > 1) matched = tokens.every(t => text.toLowerCase().includes(t));
+                for (const pq of parsedQueries) {
+                    if (pq.type === 'regex' && pq.re) {
+                        pq.re.lastIndex = 0;
+                        if (pq.re.test(text)) { matched = true; break; }
+                    } else {
+                        if (text.toLowerCase().includes(pq.lq)) { matched = true; break; }
+                        const tokens = pq.lq.split(/\s+/).filter(Boolean);
+                        if (tokens.length > 1 && tokens.every(t => text.toLowerCase().includes(t))) { matched = true; break; }
                     }
                 }
+                
                 if (matched) {
                     const entry = { index: i, role: m.is_user ? 'user' : 'assistant', name: m.name || (m.is_user ? (ctx.name1 || 'User') : (ctx.name2 || 'Character')) };
                     if (includeContent) entry.content = text.length > 500 ? text.slice(0, 500) + '...[truncated]' : text;
@@ -61,7 +68,16 @@ export async function executeTool(toolName, toolInput) {
         }
         case 'search_lorebook_entry': {
             const activeBooks = getActiveLorebookNames();
-            const query = (toolInput.query || '').toLowerCase();
+            let rawQueries = Array.isArray(toolInput.queries) ? toolInput.queries : (Array.isArray(toolInput.query) ? toolInput.query : [toolInput.query || '']);
+            const parsedQueries = rawQueries.map(q => {
+                const s = String(q);
+                const regexMatch = s.match(/^\/(.+)\/([gimsuy]*)$/);
+                if (regexMatch) {
+                    try { return { type: 'regex', re: new RegExp(regexMatch[1], regexMatch[2]) }; } catch(_) {}
+                }
+                return { type: 'text', lq: s.toLowerCase() };
+            });
+            
             const targetBook = toolInput.book_name;
             const searchIn = toolInput.search_in || 'all';
             const onlyConstant = !!toolInput.only_constant;
@@ -77,14 +93,42 @@ export async function executeTool(toolName, toolInput) {
                     const isEntryOutlet = isOutletPos || outletField !== '';
                     if (onlyConstant && !entry.constant) continue;
                     if (onlyOutlet && !isEntryOutlet) continue;
+                    
+                    const name = (entry.comment || '');
+                    const keys = (entry.key || []).join(' ');
+                    const text = (entry.content || '');
+                    
                     let matched = false;
-                    const name = (entry.comment || '').toLowerCase();
-                    const keys = (entry.key || []).join(' ').toLowerCase();
-                    const text = (entry.content || '').toLowerCase();
-                    if (searchIn === 'all') matched = name.includes(query) || keys.includes(query) || text.includes(query);
-                    else if (searchIn === 'name') matched = name.includes(query);
-                    else if (searchIn === 'keys') matched = keys.includes(query);
-                    else if (searchIn === 'content') matched = text.includes(query);
+                    for (const pq of parsedQueries) {
+                        if (pq.type === 'regex' && pq.re) {
+                            pq.re.lastIndex = 0;
+                            if (searchIn === 'all') {
+                                matched = pq.re.test(name) || pq.re.test(keys) || pq.re.test(text);
+                            } else if (searchIn === 'name') {
+                                matched = pq.re.test(name);
+                            } else if (searchIn === 'keys') {
+                                matched = pq.re.test(keys);
+                            } else if (searchIn === 'content') {
+                                matched = pq.re.test(text);
+                            }
+                        } else {
+                            const lq = pq.lq;
+                            const lname = name.toLowerCase();
+                            const lkeys = keys.toLowerCase();
+                            const ltext = text.toLowerCase();
+                            if (searchIn === 'all') {
+                                matched = lname.includes(lq) || lkeys.includes(lq) || ltext.includes(lq);
+                            } else if (searchIn === 'name') {
+                                matched = lname.includes(lq);
+                            } else if (searchIn === 'keys') {
+                                matched = lkeys.includes(lq);
+                            } else if (searchIn === 'content') {
+                                matched = ltext.includes(lq);
+                            }
+                        }
+                        if (matched) break;
+                    }
+                    
                     if (matched) results.push({
                         book: getDisplayName(bookName),
                         uid: entry.uid,

@@ -7,7 +7,7 @@ export const ICON_STORAGE_KEY = 'scp-icon-position';
 export const EMBEDDED_BOOK_KEY = '__char_embedded__';
 
 export const DEFAULT_SYSTEM_PROMPT = `<system_role>
-Identify as "ST-Copilot", a meta-analytical engine and creative strategist for SillyTavern.
+You are "ST-Copilot", a meta-analytical engine and creative strategist for SillyTavern.
 - Human: The person operating the interface. Direct your OOC insights to them.
 - {{user}}: The in-universe player avatar.
 - {{char}}: The AI persona/setting.
@@ -288,9 +288,21 @@ export const TOOL_CALL_FORMAT_BLOCK = `\`\`\`tool_call\n{"name": "tool_name","in
     // ─── Changelog Data ──────────────────────────────────────────────────────────
 export const CHANGELOG = [
     {
+        version: '2.8.3',
+        date: '6/20/2026',
+        announce: false,
+        notes: [
+            '<strong>Search Enhancements</strong> — Search tools now support multiple queries simultaneously for better information retrieval.',
+            '<strong>Session Reliability</strong> — Resolved critical bugs affecting the deletion and management of Copilot sessions.',
+            '<strong>Lorebook UI</strong> — Restored lorebook source icons and fixed a bug where "Proposed Changes" would reappear after application.',
+            '<strong>World Info Drawer</strong> — Fixed various extension bugs (Special thanks to @Haruny for the debugging and fixes).',
+            '<strong>UI/UX Polishing</strong> — Addressed several layout inconsistencies and minor interface bugs.'
+        ],
+    },
+    {
         version: '2.8.2',
         date: '6/16/2026',
-        announce: true,
+        announce: false,
         notes: [
             '<strong>Character Management</strong> — Copilot can now access and modify Name, Main Prompt Override, and Post-History Instructions.',
             '<strong>Lorebook API</strong> — Added <code>get_lorebooks</code> tool and upgraded <code>search_lorebook_entries</code> with <code>is_constant</code> and <code>is_outlet</code> parameters.',
@@ -668,14 +680,18 @@ export const TOOL_DEFINITIONS = [
             schema: {
                 type: 'object',
                 properties: {
-                    query: { type: 'string', description: 'Text or regex to search for (prefix with / for regex, e.g. /hello.*/i)' },
+                    queries: { 
+                        type: 'array', 
+                        items: { type: 'string' }, 
+                        description: 'One or more text queries or regexes to search for (prefix with / for regex, e.g. ["/hello.*/i", "hi"]). Returns matches if ANY query matches.' 
+                    },
                     role: { type: 'string', enum: ['all', 'user', 'assistant'], description: 'Which messages to search' },
                     from_index: { type: 'number', description: 'Start search from this message index (optional)' },
                     to_index: { type: 'number', description: 'End search at this message index (optional)' },
                     max_results: { type: 'number', description: 'Maximum number of results to return (default 10)' },
                     include_content: { type: 'boolean', description: 'Include full message content in results (default true)' },
                 },
-                required: ['query'],
+                required: ['queries'],
             },
         },
         {
@@ -683,18 +699,22 @@ export const TOOL_DEFINITIONS = [
             name: 'search_lorebook_entry',
             label: 'Search Lorebook Entries',
             icon: 'fa-book',
-            description: 'Search for entries in active lorebooks by name, keyword, or content. Can filter by constant or outlet type.',
+            description: 'Search for entries in active lorebooks by name, keyword, or content. Supports fuzzy matching and regex. Can filter by constant or outlet type.',
             settingKey: 'toolsEnabled_search_lorebook',
             schema: {
                 type: 'object',
                 properties: {
-                    query: { type: 'string', description: 'Text to search for in entry names, keys, and content' },
+                    queries: { 
+                        type: 'array', 
+                        items: { type: 'string' }, 
+                        description: 'One or more text queries or regexes to search for in entry names, keys, and content (prefix with / for regex, e.g. ["/elf.*/i", "elve"]). Returns matches if ANY query matches.' 
+                    },
                     book_name: { type: 'string', description: 'Specific lorebook name to search (optional)' },
                     search_in: { type: 'string', enum: ['all', 'name', 'keys', 'content'], description: 'Where to search (default: all)' },
                     only_constant: { type: 'boolean', description: 'If true, return only constant (always-active) entries' },
                     only_outlet: { type: 'boolean', description: 'If true, return only outlet entries (injected via {{outlet::name}} macro)' },
                 },
-                required: ['query'],
+                required: ['queries'],
             },
         },
         {
