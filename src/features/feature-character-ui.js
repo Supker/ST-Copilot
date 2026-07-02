@@ -3,7 +3,7 @@ import { getSettings, saveSettings, getCurrentSession, addMessage, saveSessionsT
 import { escHtml } from '../utils/util-dom.js';
 import { bringWindowToFront } from '../ui/ui-window.js';
 import { applySearchReplaceToField } from '../utils/util-text.js';
-import { getCharFieldValue, saveCharacterField, stripCharCreationBlock, stripCharChangesBlock, createCharacterAPI } from './feature-character-engine.js';
+import { getCharFieldValue, saveCharacterField, stripCharCreationBlock, stripCharChangesBlock, createCharacterAPI, groupChangesByCharacter } from './feature-character-engine.js';
 import { openTextDiffModal } from '../utils/util-diff.js';
 
 import { addHistoryToSwipe, _renderMsgBodyContent } from '../ui/ui-chat.js';
@@ -19,8 +19,8 @@ export function buildAltGreetingsPicker(container, isOverride = false) {
     if (!s.altGreetingIndices) s.altGreetingIndices = {};
     
     const ctx = SillyTavern.getContext();
-    const charId = ctx.characterId || 'unknown';
-    const char = ctx.characters?.[charId];
+    const char = ctx.characters?.[ctx.characterId];
+    const charId = char?.avatar || 'unknown';
     const greetings = char?.data?.alternate_greetings || [];
 
     let isEnabled = false;
@@ -125,9 +125,7 @@ export function refreshAltGreetingsPickers() {
     buildAltGreetingsPicker(document.getElementById('scp-sp-ov-ce-alt-greetings-picker'), true);
 }
 
-export async function applyCharChanges(changes, afterMsgId = null) {
-    const ctx = SillyTavern.getContext();
-    const char = ctx.characters?.[ctx.characterId];
+export async function applyCharChanges(changes, char, afterMsgId = null) {
     if (!char) { toastr.error('[CharEdit] No active character.', EXT_DISPLAY); return; }
     const successLog = [];
 
@@ -144,7 +142,7 @@ export async function applyCharChanges(changes, afterMsgId = null) {
                 } else {
                     const idx = (change.index || 1) - 1;
                     if (idx < 0 || idx >= greetings.length) { toastr.warning(`[CharEdit] Greeting index ${change.index} out of range.`, EXT_DISPLAY); continue; }
-                    
+
                     if (action === 'overwrite') {
                         greetings[idx] = change.value || '';
                     } else if (action === 'prepend') {
@@ -162,7 +160,7 @@ export async function applyCharChanges(changes, afterMsgId = null) {
                         if (!allMatched) continue;
                         greetings[idx] = current;
                     }
-                    
+
                     await saveCharacterField(char, 'alternate_greetings', greetings);
                     successLog.push(change);
                 }
@@ -196,12 +194,12 @@ export async function applyCharChanges(changes, afterMsgId = null) {
     }
 
     if (successLog.length > 0) {
-        logCharEditHistory(successLog, 'Applied', afterMsgId);
-        toastr.success(`[CharEdit] ${successLog.length} change(s) applied.`, EXT_DISPLAY);
+        logCharEditHistory(successLog, 'Applied', afterMsgId, char.name);
+        toastr.success(`[CharEdit] ${successLog.length} change(s) applied to ${char.name}.`, EXT_DISPLAY);
     }
 }
 
-export function logCharEditHistory(changes, statusStr, afterMsgId = null) {
+export function logCharEditHistory(changes, statusStr, afterMsgId = null, charName = null) {
     if (!changes?.length) return;
     try {
         const getFieldLabel = (f) => {
@@ -214,16 +212,16 @@ export function logCharEditHistory(changes, statusStr, afterMsgId = null) {
         const session = getCurrentSession();
         const icon = statusStr === 'Applied' ? '✓' : (statusStr === 'Rejected' ? '✕' : '·');
         const actionText = statusStr === 'Applied' ? 'ACCEPTED' : (statusStr === 'Rejected' ? 'REJECTED' : 'DISMISSED (ignored)');
-        
+
         const newLines = changes.map(c => {
             const patches = c.patches ? ` (${c.patches.length} patch${c.patches.length !== 1 ? 'es' : ''})` : '';
             return `${icon} **${actionText}**: \`${escHtml(getFieldLabel(c.field))}\` — ${escHtml(c.action || '?')}${c.index ? ` #${c.index}` : ''}${patches}`;
         });
 
-        if (afterMsgId && addHistoryToSwipe(afterMsgId, newLines)) return;
+        if (afterMsgId && addHistoryToSwipe(afterMsgId, newLines, charName)) return;
 
-        const histText = `**System Notification** — Character card edits:\n${newLines.join('\n')}`;
-        const msg = addMessage(session, 'system', histText, { isCharEditHistory: true, isLBHistory: true, appliedLines: [...newLines] });
+        const histText = `**System Notification** — Character card edits${charName ? ` for **${escHtml(charName)}**` : ''}:\n${newLines.join('\n')}`;
+        const msg = addMessage(session, 'system', histText, { isCharEditHistory: true, isLBHistory: true, appliedLines: [...newLines], _charName: charName || null });
         appendLBHistoryEl(msg);
     } catch (_) {}
 }
@@ -405,13 +403,27 @@ export function renderCharCreationCard(creationData, msgEl) {
     bringWindowToFront();
 }
 
-export function renderCharProposalCard(changes, msgEl) {
-    if (!changes?.length) return;
-    document.querySelector(`.scp-char-proposal-card[data-for="${msgEl.dataset.id}"]`)?.remove();
+function _syncAllCardsToMessage(msgId) {
+    const session = getCurrentSession();
+    const msg = session.messages.find(m => m.id === msgId);
+    if (!msg) return;
+    const cards = document.querySelectorAll(`.scp-char-proposal-card[data-for="${msgId}"]`);
+    const pendingAll = [];
+    cards.forEach(c => {
+        const ec = c._editableChanges || [];
+        const states = c._itemStates || [];
+        ec.forEach((change, i) => { if (states[i] === 'pending') pendingAll.push(change); });
+    });
+    const stripped = stripCharChangesBlock(msg.content);
+    msg.content = pendingAll.length ? stripped + '\n\n' + reconstructCharChangesBlock(pendingAll) : stripped;
+    if (msg.swipes) msg.swipes[msg.swipeIndex || 0].content = msg.content;
+    saveSessionsToMetadata();
+}
 
-    const ctx = SillyTavern.getContext();
-    const char = ctx.characters?.[ctx.characterId];
+function _buildCharProposalCardForCharacter(changes, msgEl, char) {
+    const msgId = msgEl.dataset.id;
     const editableChanges = changes.map(c => JSON.parse(JSON.stringify(c)));
+    editableChanges.forEach(c => { c.char = char.name; });
     const itemStates = editableChanges.map(() => 'pending');
 
     const getFieldLabel = (f) => {
@@ -424,33 +436,23 @@ export function renderCharProposalCard(changes, msgEl) {
 
     const card = document.createElement('div');
     card.className = 'scp-lb-proposal-card scp-char-proposal-card';
-    card.dataset.for = msgEl.dataset.id;
+    card.dataset.for = msgId;
     card.style.margin = '8px 0 0 0';
+    card._editableChanges = editableChanges;
+    card._itemStates = itemStates;
 
-    const syncBlockToMessage = () => {
-        const session = getCurrentSession();
-        const msg = session.messages.find(m => m.id === card.dataset.for);
-        if (!msg) return;
-        const pending = editableChanges.filter((_, i) => itemStates[i] === 'pending');
-        const stripped = stripCharChangesBlock(msg.content);
-        if (pending.length === 0) msg.content = stripped;
-        else msg.content = stripped + '\n\n' + reconstructCharChangesBlock(pending);
-        if (msg.swipes) msg.swipes[msg.swipeIndex || 0].content = msg.content;
-        saveSessionsToMetadata();
-    };
-
-    const persistState = () => {};
     const getPending = () => itemStates.filter(s => s === 'pending').length;
     const checkAllResolved = () => {
         if (getPending() > 0) return;
-        syncBlockToMessage();
-        card.remove(); 
-        const msg = getCurrentSession().messages.find(m => m.id === msgEl.dataset.id);
-        if (msg) _renderMsgBodyContent(msgEl, msg);
+        card.remove();
+        const remaining = document.querySelectorAll(`.scp-char-proposal-card[data-for="${msgId}"]`);
+        if (!remaining.length) {
+            const msg = getCurrentSession().messages.find(m => m.id === msgId);
+            if (msg) _renderMsgBodyContent(msgEl, msg);
+        }
     };
 
     const validateReplaceChange = (change) => {
-        if (!char) return { valid: false, reason: 'No active character' };
         let current;
         if (change.field === 'alternate_greetings') {
             const idx = (change.index || 1) - 1;
@@ -467,7 +469,6 @@ export function renderCharProposalCard(changes, msgEl) {
     };
 
     const getAppliedResult = (change) => {
-        if (!char) return '';
         if (change.action === 'overwrite') return change.value || '';
         let current;
         if (change.field === 'alternate_greetings') {
@@ -483,7 +484,6 @@ export function renderCharProposalCard(changes, msgEl) {
         return current;
     };
 
-    // Header
     const header = document.createElement('div');
     header.className = 'scp-lb-proposal-header';
     const headerLeft = document.createElement('div');
@@ -491,16 +491,16 @@ export function renderCharProposalCard(changes, msgEl) {
     const countBadge = document.createElement('span');
     countBadge.className = 'scp-lb-proposal-count';
     countBadge.textContent = `${editableChanges.length} pending`;
-    headerLeft.innerHTML = `<span class="scp-lb-proposal-icon" style="color:var(--scp-accent);display:flex"><i class="fa-solid fa-user-pen"></i></span><span class="scp-lb-proposal-title">Proposed Character Edits</span>`;
+    headerLeft.innerHTML = `<span class="scp-lb-proposal-icon" style="color:var(--scp-accent);display:flex"><i class="fa-solid fa-user-pen"></i></span><span class="scp-lb-proposal-title">Proposed Edits: ${escHtml(char.name)}</span>`;
     headerLeft.appendChild(countBadge);
     const dismissBtn = document.createElement('button');
     dismissBtn.className = 'scp-lb-proposal-dismiss'; dismissBtn.innerHTML = I.x; dismissBtn.title = 'Dismiss';
-    dismissBtn.addEventListener('click', () => { 
+    dismissBtn.addEventListener('click', () => {
         const pending = editableChanges.filter((_, i) => itemStates[i] === 'pending');
-        if (pending.length > 0) logCharEditHistory(pending, 'Dismissed', card.dataset.for);
+        if (pending.length > 0) logCharEditHistory(pending, 'Dismissed', msgId, char.name);
         itemStates.forEach((s, i) => { if (s === 'pending') itemStates[i] = 'dismissed'; });
-        syncBlockToMessage(); 
-        card.remove(); 
+        _syncAllCardsToMessage(msgId);
+        card.remove();
     });
     header.appendChild(headerLeft); header.appendChild(dismissBtn);
 
@@ -527,7 +527,7 @@ export function renderCharProposalCard(changes, msgEl) {
         const btns = document.createElement('div');
         btns.className = 'scp-lb-proposal-item-btns';
 
-        if ((c.action === 'replace' || c.action === 'overwrite') && char) {
+        if (c.action === 'replace' || c.action === 'overwrite') {
             const diffBtn = document.createElement('button');
             diffBtn.className = 'scp-lb-proposal-diff-btn'; diffBtn.title = 'View diff'; diffBtn.innerHTML = I.diff;
             diffBtn.addEventListener('click', e => {
@@ -541,7 +541,7 @@ export function renderCharProposalCard(changes, msgEl) {
                     original = String(getCharFieldValue(char, change.field));
                 }
                 const result = getAppliedResult(change);
-                const title = `Diff: ${getFieldLabel(c.field)}${c.index?` #${c.index}`:''}`;
+                const title = `Diff: ${getFieldLabel(c.field)}${c.index?` #${c.index}`:''} (${char.name})`;
                 openTextDiffModal(title, original, result);
             });
             btns.appendChild(diffBtn);
@@ -554,7 +554,7 @@ export function renderCharProposalCard(changes, msgEl) {
         const applyBtn = document.createElement('button');
         applyBtn.className = 'scp-lb-proposal-item-apply'; applyBtn.title = 'Apply'; applyBtn.textContent = '✓';
 
-        if (c.action === 'replace' && char) {
+        if (c.action === 'replace') {
             const { valid, reason } = validateReplaceChange(editableChanges[ci]);
             if (!valid) {
                 applyBtn.disabled = true;
@@ -571,33 +571,22 @@ export function renderCharProposalCard(changes, msgEl) {
             e.stopPropagation();
             if (itemStates[ci] !== 'pending' || applyBtn.disabled) return;
             applyBtn.disabled = true; applyBtn.textContent = '\u2026';
-            
+
             const isNameField = editableChanges[ci].field === 'name';
-            if (isNameField) {
-                itemStates[ci] = 'applied';
-                syncBlockToMessage();
-            }
+            if (isNameField) { itemStates[ci] = 'applied'; _syncAllCardsToMessage(msgId); }
 
             try {
-                await applyCharChanges([editableChanges[ci]], card.dataset.for);
-                
-                if (!isNameField) {
-                    itemStates[ci] = 'applied';
-                    syncBlockToMessage();
-                }
+                await applyCharChanges([editableChanges[ci]], char, msgId);
+                if (!isNameField) { itemStates[ci] = 'applied'; _syncAllCardsToMessage(msgId); }
 
                 item.classList.add('scp-lb-item-applied');
                 btns.querySelectorAll('button').forEach(b => { b.disabled = true; });
-                persistState(); countBadge.textContent = `${getPending()} pending`; updateFooter(); 
+                countBadge.textContent = `${getPending()} pending`; updateFooter();
                 checkAllResolved();
             } catch (err) {
                 toastr.error(`Failed: ${err.message}`, EXT_DISPLAY);
                 applyBtn.disabled = false; applyBtn.textContent = '\u2713';
-                
-                if (isNameField) {
-                    itemStates[ci] = 'pending';
-                    syncBlockToMessage();
-                }
+                if (isNameField) { itemStates[ci] = 'pending'; _syncAllCardsToMessage(msgId); }
             }
         });
 
@@ -609,9 +598,9 @@ export function renderCharProposalCard(changes, msgEl) {
             itemStates[ci] = 'rejected';
             item.classList.add('scp-lb-item-rejected');
             btns.querySelectorAll('button').forEach(b => { b.disabled = true; });
-            logCharEditHistory([editableChanges[ci]], 'Rejected', card.dataset.for);
-            persistState(); countBadge.textContent = `${getPending()} pending`; updateFooter(); 
-            syncBlockToMessage();
+            logCharEditHistory([editableChanges[ci]], 'Rejected', msgId, char.name);
+            countBadge.textContent = `${getPending()} pending`; updateFooter();
+            _syncAllCardsToMessage(msgId);
             checkAllResolved();
         });
 
@@ -619,7 +608,6 @@ export function renderCharProposalCard(changes, msgEl) {
         hdr.appendChild(meta); hdr.appendChild(btns);
         item.appendChild(hdr);
 
-        // Preview (expandable)
         const buildPreviewText = () => {
             const change = editableChanges[ci];
             if (change.action === 'replace' && change.patches?.length) {
@@ -644,13 +632,13 @@ export function renderCharProposalCard(changes, msgEl) {
         previewEl.style.cursor = 'pointer';
         previewEl.title = 'Click to expand/collapse';
         previewEl.addEventListener('click', e => {
+            if (window.getSelection()?.toString().length > 0) return;
             e.stopPropagation();
             _expanded = !_expanded;
             refreshPreview();
         });
         item.appendChild(previewEl);
 
-        // Edit panel
         const editPanel = document.createElement('div');
         editPanel.className = 'scp-lb-proposal-edit-panel';
         editPanel.style.display = 'none';
@@ -666,7 +654,6 @@ export function renderCharProposalCard(changes, msgEl) {
         const rebuildEditPanel = () => {
             editPanel.innerHTML = '';
             const change = editableChanges[ci];
-
             if (change.action === 'replace') {
                 (change.patches || []).forEach((patch, pi) => {
                     const pHdr = document.createElement('div');
@@ -679,7 +666,7 @@ export function renderCharProposalCard(changes, msgEl) {
                         delP.addEventListener('click', () => {
                             change.patches.splice(pi, 1);
                             rebuildEditPanel();
-                            if (char) { const { valid } = validateReplaceChange(change); applyBtn.disabled = !valid; }
+                            const { valid } = validateReplaceChange(change); applyBtn.disabled = !valid;
                             refreshPreview();
                         });
                         pHdr.appendChild(delP);
@@ -689,17 +676,12 @@ export function renderCharProposalCard(changes, msgEl) {
                     const searchTa = document.createElement('textarea');
                     searchTa.className = 'scp-lb-pe-textarea'; searchTa.rows = 2; searchTa.value = patch.search || '';
                     searchTa.placeholder = 'first unique words || last unique words';
-                    searchTa.addEventListener('input', () => { 
-                        editableChanges[ci].patches[pi].search = searchTa.value; 
-                    });
+                    searchTa.addEventListener('input', () => { editableChanges[ci].patches[pi].search = searchTa.value; });
                     editPanel.appendChild(mkRow('Anchor', searchTa));
 
                     const replaceTa = document.createElement('textarea');
                     replaceTa.className = 'scp-lb-pe-textarea'; replaceTa.rows = 3; replaceTa.value = patch.replace || '';
-                    replaceTa.addEventListener('input', () => {
-                        change.patches[pi].replace = replaceTa.value;
-                        refreshPreview();
-                    });
+                    replaceTa.addEventListener('input', () => { change.patches[pi].replace = replaceTa.value; refreshPreview(); });
                     editPanel.appendChild(mkRow('Replace', replaceTa));
 
                     if (pi < change.patches.length - 1) {
@@ -712,10 +694,7 @@ export function renderCharProposalCard(changes, msgEl) {
                 const addPatchBtn = document.createElement('button');
                 addPatchBtn.className = 'scp-action-btn'; addPatchBtn.style.marginTop = '8px';
                 addPatchBtn.innerHTML = `${I.plus}<span>Add Patch</span>`;
-                addPatchBtn.addEventListener('click', () => {
-                    change.patches.push({ search: '', replace: '' });
-                    rebuildEditPanel();
-                });
+                addPatchBtn.addEventListener('click', () => { change.patches.push({ search: '', replace: '' }); rebuildEditPanel(); });
                 editPanel.appendChild(addPatchBtn);
             } else {
                 const valueTa = document.createElement('textarea');
@@ -724,7 +703,6 @@ export function renderCharProposalCard(changes, msgEl) {
                 editPanel.appendChild(mkRow('Value', valueTa));
             }
         };
-
         rebuildEditPanel();
         item.appendChild(editPanel);
 
@@ -741,16 +719,6 @@ export function renderCharProposalCard(changes, msgEl) {
         return item;
     });
 
-    itemEls.forEach((el, i) => {
-        if (itemStates[i] === 'applied') {
-            el.classList.add('scp-lb-item-applied');
-            el.querySelectorAll('button').forEach(b => { b.disabled = true; });
-        } else if (itemStates[i] === 'rejected') {
-            el.classList.add('scp-lb-item-rejected');
-            el.querySelectorAll('button').forEach(b => { b.disabled = true; });
-        }
-    });
-
     const footer = document.createElement('div');
     footer.className = 'scp-lb-proposal-footer';
     const applyAllBtn = document.createElement('button');
@@ -758,11 +726,11 @@ export function renderCharProposalCard(changes, msgEl) {
     const rejectAllBtn = document.createElement('button');
     rejectAllBtn.className = 'scp-lb-proposal-reject'; rejectAllBtn.textContent = 'Reject All';
 
-    const updateFooter = () => {
+    function updateFooter() {
         const p = getPending();
         applyAllBtn.style.display = p > 0 ? '' : 'none';
         rejectAllBtn.style.display = p > 0 ? '' : 'none';
-    };
+    }
     updateFooter();
 
     applyAllBtn.addEventListener('click', async () => {
@@ -770,54 +738,54 @@ export function renderCharProposalCard(changes, msgEl) {
         editableChanges.forEach((_, i) => { if (itemStates[i] === 'pending') pendingIndices.push(i); });
         const pending = pendingIndices.map(i => editableChanges[i]);
         if (!pending.length) return;
-        
         applyAllBtn.disabled = true; applyAllBtn.textContent = 'Applying\u2026';
-        
+
         const hasNameField = pending.some(c => c.field === 'name');
-        if (hasNameField) {
-            pendingIndices.forEach(i => { itemStates[i] = 'applied'; });
-            syncBlockToMessage();
-        }
+        if (hasNameField) { pendingIndices.forEach(i => { itemStates[i] = 'applied'; }); _syncAllCardsToMessage(msgId); }
 
         try {
-            await applyCharChanges(pending, card.dataset.for);
-            
-            if (!hasNameField) {
-                pendingIndices.forEach(i => { itemStates[i] = 'applied'; });
-                syncBlockToMessage();
-            }
-            
+            await applyCharChanges(pending, char, msgId);
+            if (!hasNameField) { pendingIndices.forEach(i => { itemStates[i] = 'applied'; }); _syncAllCardsToMessage(msgId); }
             pendingIndices.forEach(i => {
-                if (itemEls[i]) {
-                    itemEls[i].classList.add('scp-lb-item-applied');
-                    itemEls[i].querySelectorAll('button').forEach(b => { b.disabled = true; });
-                }
+                if (itemEls[i]) { itemEls[i].classList.add('scp-lb-item-applied'); itemEls[i].querySelectorAll('button').forEach(b => { b.disabled = true; }); }
             });
-            persistState(); countBadge.textContent = `${getPending()} pending`; updateFooter(); 
+            countBadge.textContent = `${getPending()} pending`; updateFooter();
             checkAllResolved();
         } catch (e) {
             toastr.error(`Failed: ${e.message}`, EXT_DISPLAY);
             applyAllBtn.disabled = false; applyAllBtn.textContent = 'Apply All';
-            
-            if (hasNameField) {
-                pendingIndices.forEach(i => { itemStates[i] = 'pending'; });
-                syncBlockToMessage();
-            }
+            if (hasNameField) { pendingIndices.forEach(i => { itemStates[i] = 'pending'; }); _syncAllCardsToMessage(msgId); }
         }
     });
     rejectAllBtn.addEventListener('click', () => {
         const pending = editableChanges.filter((_, i) => itemStates[i] === 'pending');
         itemStates.forEach((s, i) => { if (s === 'pending') { itemStates[i] = 'rejected'; itemEls[i]?.classList.add('scp-lb-item-rejected'); itemEls[i]?.querySelectorAll('button').forEach(b => { b.disabled = true; }); } });
-        logCharEditHistory(pending, 'Rejected', card.dataset.for);
-        persistState(); countBadge.textContent = `${getPending()} pending`; updateFooter(); 
-        syncBlockToMessage();
+        logCharEditHistory(pending, 'Rejected', msgId, char.name);
+        countBadge.textContent = `${getPending()} pending`; updateFooter();
+        _syncAllCardsToMessage(msgId);
         checkAllResolved();
     });
 
     footer.appendChild(applyAllBtn); footer.appendChild(rejectAllBtn);
     card.appendChild(header); card.appendChild(list); card.appendChild(footer);
+    return card;
+}
+
+export function renderCharProposalCard(changes, msgEl) {
+    if (!changes?.length) return;
+    const msgId = msgEl.dataset.id;
+    document.querySelectorAll(`.scp-char-proposal-card[data-for="${msgId}"]`).forEach(c => c.remove());
+
+    const groups = groupChangesByCharacter(changes);
+    if (!groups.length) return;
+
     const body = msgEl.querySelector('.scp-msg-body');
-    if (body) body.insertBefore(card, body.querySelector('.scp-swipe-bar'));
-    else msgEl.after(card);
+    const swipeBar = body?.querySelector('.scp-swipe-bar');
+
+    groups.forEach(({ char, changes: charChanges }) => {
+        const card = _buildCharProposalCardForCharacter(charChanges, msgEl, char);
+        if (body) body.insertBefore(card, swipeBar);
+        else msgEl.after(card);
+    });
     bringWindowToFront();
 }

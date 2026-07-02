@@ -235,6 +235,7 @@ export function loadProfile(name) {
     s.activeProfile = name; saveSettings();
     if (typeof updateSettingsUI === 'function') updateSettingsUI();
     _takeProfileSnapshot(); state.configDirty = false; _updateDirtyDots();
+    _pruneMatchingOverrides();
 }
 
 export function deleteProfile(name) {
@@ -531,15 +532,40 @@ function _applyConnectionSourceVisibility(val) {
 
 function _pruneMatchingOverrides() {
     const s = getSettings(); const bucket = getChatBucket(); let changed = false;
-    bucket.sessions.forEach(sess => {
-        if (!sess.overrides) return;
-        for (const key of Object.keys(sess.overrides)) {
-            const globalVal = key.startsWith('charField_') ? (s.charEditFields || {})[key.replace('charField_', '')] !== false : s[key];
-            const isEqual = typeof globalVal === 'boolean' ? sess.overrides[key] === globalVal : String(sess.overrides[key]) === String(globalVal);
-            if (isEqual) { delete sess.overrides[key]; changed = true; }
+    
+    if (bucket && bucket.sessions) {
+        bucket.sessions.forEach(sess => {
+            if (!sess.overrides) return;
+            for (const key of Object.keys(sess.overrides)) {
+                const globalVal = key.startsWith('charField_') ? (s.charEditFields || {})[key.replace('charField_', '')] !== false : s[key];
+                const isEqual = typeof globalVal === 'boolean' ? sess.overrides[key] === globalVal : String(sess.overrides[key]) === String(globalVal);
+                if (isEqual) { delete sess.overrides[key]; changed = true; }
+            }
+        });
+        if (changed) { saveSessionsToMetadata(); updateSessionOverrideIndicator(); }
+    }
+
+    let charChanged = false;
+    if (s.charMgrFieldOverrides) {
+        for (const charId of Object.keys(s.charMgrFieldOverrides)) {
+            const ovs = s.charMgrFieldOverrides[charId];
+            for (const key of Object.keys(ovs)) {
+                const globalVal = (s.charEditFields || {})[key] !== false;
+                if (ovs[key] === globalVal) {
+                    delete ovs[key];
+                    charChanged = true;
+                }
+            }
+            if (Object.keys(ovs).length === 0) {
+                delete s.charMgrFieldOverrides[charId];
+            }
         }
+    }
+    if (charChanged) saveSettings();
+    
+    document.querySelectorAll('.scp-char-ov-row').forEach(row => {
+        if (typeof row._refreshOverride === 'function') row._refreshOverride();
     });
-    if (changed) { saveSessionsToMetadata(); updateSessionOverrideIndicator(); }
 }
 
 function _readFromSettings(def) {

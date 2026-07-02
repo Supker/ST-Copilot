@@ -12,65 +12,121 @@ export function getEffectiveCharField(settings, k) {
     return !!(settings.charEditFields || {})[k];
 }
 
-export function buildCharacterContextBlock(settings) {
+export function isCharacterExcluded(settings, charId) {
+    return (settings.charMgrExcluded || []).includes(charId);
+}
+
+export function setCharacterExcluded(settings, charId, excluded) {
+    if (!Array.isArray(settings.charMgrExcluded)) settings.charMgrExcluded = [];
+    const idx = settings.charMgrExcluded.indexOf(charId);
+    if (excluded && idx === -1) settings.charMgrExcluded.push(charId);
+    else if (!excluded && idx !== -1) settings.charMgrExcluded.splice(idx, 1);
+}
+
+export function getCharFieldOverride(settings, charId, field) {
+    return (settings.charMgrFieldOverrides || {})[charId]?.[field];
+}
+
+export function setCharFieldOverride(settings, charId, field, value) {
+    if (!settings.charMgrFieldOverrides) settings.charMgrFieldOverrides = {};
+    if (!settings.charMgrFieldOverrides[charId]) settings.charMgrFieldOverrides[charId] = {};
+    if (value === undefined) delete settings.charMgrFieldOverrides[charId][field];
+    else settings.charMgrFieldOverrides[charId][field] = value;
+}
+
+export function getEffectiveCharFieldForChar(settings, charId, field) {
+    const ov = getCharFieldOverride(settings, charId, field);
+    return ov !== undefined ? ov : getEffectiveCharField(settings, field);
+}
+
+export function getActiveCharacterEntities() {
     const ctx = SillyTavern.getContext();
-    const charId = ctx.characterId || 'unknown';
-    const char = ctx.characters?.[charId];
-    if (!char) return '';
+    const entities = [];
+    const seen = new Set();
+    const pushChar = char => {
+        if (char && !seen.has(char.avatar)) {
+            seen.add(char.avatar);
+            entities.push({ id: char.avatar, name: char.name, avatar: char.avatar, char, isPersona: false });
+        }
+    };
+
+    if (ctx.groupId) {
+        const group = (ctx.groups || []).find(g => g.id === ctx.groupId);
+        (group?.members || []).forEach(m => {
+            const avatarId = typeof m === 'string' ? m : (m?.avatar || m?.id);
+            pushChar((ctx.characters || []).find(c => c.avatar === avatarId));
+        });
+    } else {
+        pushChar(ctx.characters?.[ctx.characterId]);
+    }
+    return entities;
+}
+function buildSingleCharacterBlock(settings, entity) {
+    const ctx = SillyTavern.getContext();
+    const { char, id: charId } = entity;
     const d = char.data || {};
     const parts = [];
+    const eff = field => getEffectiveCharFieldForChar(settings, charId, field);
 
     const charTags = getTagsForCharacter(char);
-    if (getEffectiveCharField(settings, 'tags') && charTags.length) {
-        parts.push(`<tags>\n${charTags.join(', ')}\n</tags>`);
-    }
+    if (eff('tags') && charTags.length) parts.push(`<tags>\n${charTags.join(', ')}\n</tags>`);
 
     const sysPrompt = d.system_prompt || char.system_prompt;
-    if (getEffectiveCharField(settings, 'system_prompt') && sysPrompt) {
-        parts.push(`<character_system_prompt_override>\n${sysPrompt}\n</character_system_prompt_override>`);
-    }
+    if (eff('system_prompt') && sysPrompt) parts.push(`<character_system_prompt_override>\n${sysPrompt}\n</character_system_prompt_override>`);
+
     const postHist = d.post_history_instructions || char.post_history_instructions;
-    if (getEffectiveCharField(settings, 'post_history_instructions') && postHist) {
-        parts.push(`<post_history_instructions>\n${postHist}\n</post_history_instructions>`);
-    }
+    if (eff('post_history_instructions') && postHist) parts.push(`<post_history_instructions>\n${postHist}\n</post_history_instructions>`);
 
     const simple = {
-        name: char.name,
         description: d.description || char.description,
         personality: d.personality || char.personality,
         scenario: d.scenario || char.scenario,
         first_mes: d.first_mes || char.first_mes,
         mes_example: d.mes_example || char.mes_example,
     };
-    
-    if (getSettings().useAspectEvolutia) {
+
+    const isMainChar = char.avatar === ctx.characters?.[ctx.characterId]?.avatar;
+    if (isMainChar && getSettings().useAspectEvolutia) {
         const aeFields = _getAspectEvolutiaCharFields();
         if (aeFields && aeFields.length) {
             delete simple.description;
-            aeFields.forEach(f => {
-                parts.push(`<evolutia_char_field name="${escHtml(f.name)}">\n${f.content}\n</evolutia_char_field>`);
-            });
+            aeFields.forEach(f => parts.push(`<evolutia_char_field name="${escHtml(f.name)}">\n${f.content}\n</evolutia_char_field>`));
         }
     }
 
     for (const [key, val] of Object.entries(simple)) {
-        if ((key === 'name' || getEffectiveCharField(settings, key)) && val) parts.push(`<${key}>\n${val}\n</${key}>`);
+        if (eff(key) && val) parts.push(`<${key}>\n${val}\n</${key}>`);
     }
-    if (getEffectiveCharField(settings, 'alternate_greetings') && Array.isArray(d.alternate_greetings) && d.alternate_greetings.length) {
+
+    if (eff('alternate_greetings') && Array.isArray(d.alternate_greetings) && d.alternate_greetings.length) {
         const agMap = settings.altGreetingIndices || {};
         const indices = Array.isArray(agMap[charId]) ? agMap[charId] : d.alternate_greetings.map((_, i) => i);
         const filtered = indices.filter(i => i >= 0 && i < d.alternate_greetings.length);
-        
         if (filtered.length) {
             const gs = filtered.map(i => `  <greeting id="${i+1}">\n${d.alternate_greetings[i]}\n  </greeting>`).join('\n');
             parts.push(`<alternate_greetings>\n${gs}\n</alternate_greetings>`);
         }
     }
-    if (getEffectiveCharField(settings, 'authors_note')) {
+
+    if (eff('authors_note')) {
         const an = getAuthorsNote();
         if (an) parts.push(`<authors_note>\n${an}\n</authors_note>`);
     }
-    return parts.join('\n\n');
+
+    if (!parts.length) return '';
+    return `<character name="${escHtml(char.name)}">\n${parts.join('\n\n')}\n</character>`;
+}
+
+export function buildCharacterContextBlock(settings) {
+    const entities = getActiveCharacterEntities();
+    if (!entities.length) return '';
+    const excluded = new Set(settings.charMgrExcluded || []);
+    const blocks = entities
+        .filter(ent => !excluded.has(ent.id))
+        .map(ent => buildSingleCharacterBlock(settings, ent))
+        .filter(Boolean);
+    if (!blocks.length) return '';
+    return `<characters>\n${blocks.join('\n\n')}\n</characters>`;
 }
 
 export function buildCharEditAIInstructions(settings) {
@@ -106,38 +162,118 @@ export function buildCharEditAIInstructions(settings) {
     return _ensureWrapped(`${base}${evolutiaDocs}`, 'character_management');
 }
 
+function _levenshtein(a, b) {
+    a = String(a); b = String(b);
+    const m = a.length, n = b.length;
+    if (!m) return n;
+    if (!n) return m;
+    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) dp[i][0] = i;
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+        }
+    }
+    return dp[m][n];
+}
+
+export function resolveCharacterByName(aiName, entities = null) {
+    if (!aiName) return null;
+    const ctx = SillyTavern.getContext();
+    const list = entities || getActiveCharacterEntities();
+    if (!list.length) return null;
+
+    let found = list.find(e => e.char.name === aiName);
+    if (found) return found.char;
+
+    const normAi = aiName.toLowerCase().trim();
+    found = list.find(e => e.char.name.toLowerCase().trim() === normAi);
+    if (found) return found.char;
+
+    found = list.find(e => {
+        const n = e.char.name.toLowerCase().trim();
+        return n.includes(normAi) || normAi.includes(n);
+    });
+    if (found) return found.char;
+
+    if (list.length === 1) {
+        const userName = (ctx.name1 || '').toLowerCase().trim();
+        if (normAi !== userName) return list[0].char;
+    }
+
+    let best = null, bestDist = Infinity;
+    for (const e of list) {
+        const dist = _levenshtein(normAi, e.char.name.toLowerCase().trim());
+        if (dist < bestDist) { bestDist = dist; best = e.char; }
+    }
+    if (best && bestDist <= 2) return best;
+
+    return null;
+}
+
+export function groupChangesByCharacter(changes) {
+    const ctx = SillyTavern.getContext();
+    const entities = getActiveCharacterEntities();
+    const groups = new Map();
+
+    for (const change of changes) {
+        let resolvedChar = change.char ? resolveCharacterByName(change.char, entities) : null;
+        if (!resolvedChar) {
+            if (entities.length === 1) resolvedChar = entities[0].char;
+            else resolvedChar = ctx.characters?.[ctx.characterId] || entities[0]?.char || null;
+        }
+        if (!resolvedChar) continue;
+        const key = resolvedChar.avatar;
+        if (!groups.has(key)) groups.set(key, { char: resolvedChar, changes: [] });
+        groups.get(key).changes.push(change);
+    }
+    return Array.from(groups.values());
+}
+
+function _parseTagAttrs(attrStr) {
+    const attrs = {};
+    const re = /([\w-]+)="([^"]*)"/g;
+    let m;
+    while ((m = re.exec(attrStr || '')) !== null) attrs[m[1]] = m[2];
+    return attrs;
+}
+
+function _matchTagsWithAttrs(xml, tagName) {
+    const re = new RegExp(`<${tagName}((?:\\s+[\\w-]+="[^"]*")*)\\s*>([\\s\\S]*?)<\\/${tagName}>`, 'g');
+    const out = [];
+    let m;
+    while ((m = re.exec(xml)) !== null) out.push({ attrs: _parseTagAttrs(m[1]), content: m[2] });
+    return out;
+}
+
 export function parseCharChangesFromText(text) {
     let raw = null;
     const strict = text.match(/```character-changes\s*([\s\S]*?)```/);
-    if (strict) {
-        raw = strict[1];
-    } else {
+    if (strict) raw = strict[1];
+    else {
         const open = text.match(/```character-changes\s*([\s\S]*?)(?=```|$)/);
         if (open) raw = open[1];
     }
     if (!raw) return null;
     const xml = _repairCharChangesXML(raw);
     const changes = [];
-    let m;
 
-    const replaceByField = {};
-    const replaceRe = /<replace\s+field="([^"]+)"(?:\s+index="(\d+)")?>([\s\S]*?)<\/replace>/g;
-    while ((m = replaceRe.exec(xml)) !== null) {
-        const field = m[1];
-        const index = m[2] ? parseInt(m[2]) : undefined;
-        const content = m[3];
-        const key = field + (index !== undefined ? `_${index}` : '');
-        
+    const replaceByKey = {};
+    for (const { attrs, content } of _matchTagsWithAttrs(xml, 'replace')) {
+        const field = attrs.field;
+        if (!field) continue;
+        const charName = attrs.char || null;
+        const index = attrs.index ? parseInt(attrs.index, 10) : undefined;
+        const key = `${charName || ''}::${field}${index !== undefined ? `_${index}` : ''}`;
+
         const diffRe = /<<<<<<< (?:SEARCH|ANCHOR)\r?\n([\s\S]*?)\r?\n=+\r?\n([\s\S]*?)\r?\n>>>>>>> REPLACE/g;
         let diffMatch;
         const patches = [];
         while ((diffMatch = diffRe.exec(content)) !== null) {
             let searchVal = diffMatch[1];
             let replaceVal = diffMatch[2];
-            if (field === 'tags') {
-                searchVal = _sanitizeProposedTags(searchVal);
-                replaceVal = _sanitizeProposedTags(replaceVal);
-            }
+            if (field === 'tags') { searchVal = _sanitizeProposedTags(searchVal); replaceVal = _sanitizeProposedTags(replaceVal); }
             patches.push({ search: searchVal, replace: replaceVal });
         }
         if (!patches.length) {
@@ -148,57 +284,55 @@ export function parseCharChangesFromText(text) {
                 patches.push({ search: searchVal, replace: '' });
             }
         }
-        
         if (!patches.length) {
             let val = content.trim();
             if (field === 'tags') val = _sanitizeProposedTags(val);
-            const item = { field, action: 'overwrite', value: val };
+            const item = { field, action: 'overwrite', value: val, char: charName };
             if (index !== undefined) item.index = index;
             changes.push(item);
             continue;
         }
-        
-        if (!replaceByField[key]) {
-            const item = { field, action: 'replace', patches };
+        if (!replaceByKey[key]) {
+            const item = { field, action: 'replace', patches, char: charName };
             if (index !== undefined) item.index = index;
-            replaceByField[key] = item;
+            replaceByKey[key] = item;
         } else {
-            replaceByField[key].patches.push(...patches);
+            replaceByKey[key].patches.push(...patches);
         }
     }
-    for (const item of Object.values(replaceByField)) changes.push(item);
+    for (const item of Object.values(replaceByKey)) changes.push(item);
 
-    const overwriteRe = /<overwrite\s+field="([^"]+)"(?:\s+index="(\d+)")?>([\s\S]*?)<\/overwrite>/g;
-    while ((m = overwriteRe.exec(xml)) !== null) {
-        let val = m[3].trim();
-        if (m[1] === 'tags') val = _sanitizeProposedTags(val);
-        const item = { field: m[1], action: 'overwrite', value: val };
-        if (m[2]) item.index = parseInt(m[2], 10);
+    for (const { attrs, content } of _matchTagsWithAttrs(xml, 'overwrite')) {
+        if (!attrs.field) continue;
+        let val = content.trim();
+        if (attrs.field === 'tags') val = _sanitizeProposedTags(val);
+        const item = { field: attrs.field, action: 'overwrite', value: val, char: attrs.char || null };
+        if (attrs.index) item.index = parseInt(attrs.index, 10);
         changes.push(item);
     }
 
-    const appendRe = /<append\s+field="([^"]+)">([\s\S]*?)<\/append>/g;
-    while ((m = appendRe.exec(xml)) !== null) {
-        let val = m[2].trim();
-        if (m[1] === 'tags') val = _sanitizeProposedTags(val);
-        changes.push({ field: m[1], action: 'append', value: val });
+    for (const { attrs, content } of _matchTagsWithAttrs(xml, 'append')) {
+        if (!attrs.field) continue;
+        let val = content.trim();
+        if (attrs.field === 'tags') val = _sanitizeProposedTags(val);
+        changes.push({ field: attrs.field, action: 'append', value: val, char: attrs.char || null });
     }
 
-    const prependRe = /<prepend\s+field="([^"]+)"(?:\s+index="(\d+)")?>([\s\S]*?)<\/prepend>/g;
-    while ((m = prependRe.exec(xml)) !== null) {
-        let val = m[3].trim();
-        if (m[1] === 'tags') val = _sanitizeProposedTags(val);
-        const item = { field: m[1], action: 'prepend', value: val };
-        if (m[2]) item.index = parseInt(m[2], 10);
+    for (const { attrs, content } of _matchTagsWithAttrs(xml, 'prepend')) {
+        if (!attrs.field) continue;
+        let val = content.trim();
+        if (attrs.field === 'tags') val = _sanitizeProposedTags(val);
+        const item = { field: attrs.field, action: 'prepend', value: val, char: attrs.char || null };
+        if (attrs.index) item.index = parseInt(attrs.index, 10);
         changes.push(item);
     }
 
-    const appendTextRe = /<append_text\s+field="([^"]+)"(?:\s+index="(\d+)")?>([\s\S]*?)<\/append_text>/g;
-    while ((m = appendTextRe.exec(xml)) !== null) {
-        let val = m[3].trim();
-        if (m[1] === 'tags') val = _sanitizeProposedTags(val);
-        const item = { field: m[1], action: 'append_text', value: val };
-        if (m[2]) item.index = parseInt(m[2], 10);
+    for (const { attrs, content } of _matchTagsWithAttrs(xml, 'append_text')) {
+        if (!attrs.field) continue;
+        let val = content.trim();
+        if (attrs.field === 'tags') val = _sanitizeProposedTags(val);
+        const item = { field: attrs.field, action: 'append_text', value: val, char: attrs.char || null };
+        if (attrs.index) item.index = parseInt(attrs.index, 10);
         changes.push(item);
     }
 

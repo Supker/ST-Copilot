@@ -124,6 +124,17 @@ A fully integrated, highly detailed theme editor.
 ---
 
 ## 📜 Changelog History
+### V2.9.0
+*   **Character Manager:** Introduced a comprehensive manager to edit character fields and define granular context inclusion rules for each character.
+*   **Group Chat Intelligence:** Copilot can now target and modify individual character data within group chats.
+*   **Navigation Overhaul:** Integrated a new burger menu in the tools panel for quick access to Lorebook and Character managers.
+*   **Local UI Persistence:** Window size and position are now saved locally in the browser, ensuring your layout persists across sessions.
+*   **UI & UX Refinement:** Fixed "New Session" modal layering issues, resolved chat auto-scroll glitches, and patched "Proposed Changes" visual bugs.
+*   **Stability:** Implemented various API and UI fixes for a more robust experience.
+
+<details>
+<summary><b>Previous Updates (v1.7.0 - v2.8.3)</b></summary>
+
 ### V2.8.3
 *   **Multi-Query Search:** Enhanced search tools to support multiple queries at once, improving the efficiency of information gathering.
 *   **Session & Lorebook Stability:** Fixed critical session deletion bugs and resolved an issue where proposed lorebook changes would persist after being applied.
@@ -157,9 +168,6 @@ A fully integrated, highly detailed theme editor.
     *   Added **Custom Endpoint** support in connection profiles.
     *   Fixed UI displacement when opening DevTools.
     *   Resolved the bug where system messages disappeared after applying proposed changes.
-
-<details>
-<summary><b>Previous Updates (v1.7.0 - v2.7.2)</b></summary>
 
 ### V2.7.2
 *   **Shortcuts Overlay:** Added a dedicated "Shortcuts" configuration window in the settings panel for better accessibility.

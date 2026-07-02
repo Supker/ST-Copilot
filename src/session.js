@@ -630,6 +630,7 @@ export function showSessionDialog({ defaultName = '' } = {}) {
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.className = 'scp-dialog-overlay';
+        overlay.style.zIndex = '2147483050';
         overlay.innerHTML = `
             <div class="scp-dialog-box">
                 <div class="scp-dialog-title">New Session</div>
@@ -658,7 +659,9 @@ export function showSessionDialog({ defaultName = '' } = {}) {
         input.focus(); input.select();
         okBtn.addEventListener('click', () => close({ name: input.value, isTemporary }));
         cancelBtn.addEventListener('click', () => close(null));
-        overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+        let _mdTarget = null;
+        overlay.addEventListener('mousedown', e => { _mdTarget = e.target; });
+        overlay.addEventListener('click', e => { if (e.target === overlay && _mdTarget === overlay) close(null); });
         input.addEventListener('keydown', e => {
             if (e.key === 'Enter') { e.preventDefault(); close({ name: input.value, isTemporary }); }
             if (e.key === 'Escape') close(null);

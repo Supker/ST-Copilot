@@ -1,9 +1,10 @@
 import { getSettings, saveSettings } from '../session.js';
 import { state } from '../state.js';
 import { THEME_CSS_MAP, THEME_PRESETS, ICON_STORAGE_KEY, WIN_ID, EXT_DISPLAY } from '../constants.js';
-import { scrollToBottom } from './ui-chat.js';
+import { scrollToBottom, saveScrollPosition, restoreScrollPosition } from './ui-chat.js';
 
 const SCP_TOP_Z_INDEX = 2147483000;
+const WIN_POS_STORAGE_KEY = 'scp-win-pos';
 
 export function bringWindowToFront() {
     const targets = Array.from(document.body.children).filter(el =>
@@ -18,11 +19,8 @@ export function bringWindowToFront() {
         return 10;
     };
 
-    targets.sort((a, b) => getLayer(a) - getLayer(b));
-
     for (const el of targets) {
         el.style.zIndex = String(SCP_TOP_Z_INDEX + getLayer(el));
-        document.body.appendChild(el);
     }
 }
 
@@ -374,10 +372,13 @@ export function makeIconDraggable(iconTarget) {
 }
 
 export function saveWindowState(windowEl) {
-    const s = getSettings(); if (!windowEl) return;
+    if (!windowEl) return;
     const r = windowEl.getBoundingClientRect();
-    s.windowX = r.left; s.windowY = r.top; s.windowW = r.width; s.windowH = r.height;
-    saveSettings();
+    try { 
+        localStorage.setItem(WIN_POS_STORAGE_KEY, JSON.stringify({ 
+            x: r.left, y: r.top, w: r.width, h: r.height 
+        })); 
+    } catch(_) {}
 }
 
 export function applyCustomTheme(theme) {
@@ -390,6 +391,7 @@ export function applyCustomTheme(theme) {
         windowEl, 
         iconEl, 
         document.getElementById('scp-lb-overlay'), 
+        document.getElementById('scp-char-overlay'),
         document.getElementById('scp-diff-modal'), 
         document.getElementById('scp-settings-overlay'), 
         document.getElementById('scp-picker-overlay')
@@ -482,20 +484,43 @@ export function applyWindowBackground() {
 export function restoreWindowState(windowEl, iconEl) {
     const s = getSettings(); if (!windowEl) return;
     const isMobile = window.innerWidth <= 900 || ('ontouchstart' in window && window.innerWidth <= 1366);
-    
-    const w = s.windowW || 440;
-    const h = s.windowH || 600;
-    
-    if (s.windowX !== null) {
-        const maxLeft = Math.max(0, window.innerWidth - (isMobile ? window.innerWidth * 0.94 : w));
-        windowEl.style.left = `${Math.max(0, Math.min(s.windowX, maxLeft))}px`;
-        const maxTop = Math.max(0, window.innerHeight - 100);
-        windowEl.style.top = `${Math.max(0, Math.min(s.windowY ?? 80, maxTop))}px`;
-        windowEl.style.right = 'auto';
-    } else if (isMobile) {
-        windowEl.style.left = '3vw';
-        windowEl.style.top = '8vh';
-        windowEl.style.right = 'auto';
+
+    let w = 440;
+    let h = 600;
+    let posRestored = false;
+
+    try {
+        const saved = localStorage.getItem(WIN_POS_STORAGE_KEY);
+        if (saved) {
+            const { x, y, w: savedW, h: savedH } = JSON.parse(saved);
+            if (savedW) w = savedW;
+            if (savedH) h = savedH;
+
+            if (x != null && y != null) {
+                const maxLeft = Math.max(0, window.innerWidth - (isMobile ? window.innerWidth * 0.94 : w));
+                windowEl.style.left = `${Math.max(0, Math.min(x, maxLeft))}px`;
+                windowEl.style.top = `${Math.max(0, Math.min(y, window.innerHeight - 100))}px`;
+                windowEl.style.right = 'auto';
+                posRestored = true;
+            }
+        }
+    } catch(_) {}
+
+    if (!posRestored) {
+        if (s.windowW) w = s.windowW;
+        if (s.windowH) h = s.windowH;
+
+        if (s.windowX !== null && s.windowX !== undefined) {
+            const maxLeft = Math.max(0, window.innerWidth - (isMobile ? window.innerWidth * 0.94 : w));
+            windowEl.style.left = `${Math.max(0, Math.min(s.windowX, maxLeft))}px`;
+            windowEl.style.top = `${Math.max(0, Math.min(s.windowY ?? 80, window.innerHeight - 100))}px`;
+            windowEl.style.right = 'auto';
+            try { localStorage.setItem(WIN_POS_STORAGE_KEY, JSON.stringify({ x: s.windowX, y: s.windowY, w, h })); } catch(_) {}
+        } else if (isMobile) {
+            windowEl.style.left = '3vw';
+            windowEl.style.top = '8vh';
+            windowEl.style.right = 'auto';
+        }
     }
     
     if (iconEl) {
@@ -627,6 +652,7 @@ export function setupGhostHotkey() {
 }
 
 export function minimize() { 
+    saveScrollPosition();
     const windowEl = document.getElementById(WIN_ID);
     const iconEl = document.getElementById('scp-dock-icon');
     setGhostMode(false); 
@@ -647,11 +673,12 @@ export function restoreFromMinimize() {
     state.copilotActive = true;
     saveSettings(); 
     updateIconVisibility(iconEl);
-    scrollToBottom(); 
+    restoreScrollPosition(); 
     bringWindowToFront();
 }
 
 export function hideWindow() { 
+    saveScrollPosition();
     const windowEl = document.getElementById(WIN_ID);
     const iconEl = document.getElementById('scp-dock-icon');
     setGhostMode(false); 
@@ -673,10 +700,9 @@ export function showWindow() {
     s.minimized = false;
     if(windowEl) windowEl.style.display = 'flex';
     state.copilotActive = true;
-    state.userScrolledUp = false;
     saveSettings(); 
     updateIconVisibility(iconEl);
-    scrollToBottom();
+    restoreScrollPosition();
     bringWindowToFront();
 }
 

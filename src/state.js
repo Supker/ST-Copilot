@@ -17,6 +17,7 @@ export const state = {
     lbEntryDetailBook: null,
     lastChatLen: -1,
     userScrolledUp: false,
+    savedScrollTop: 0,
     abortController: null,
     htmlBlockCounter: 0,
     htmlBlockRegistry: new Map(),

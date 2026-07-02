@@ -115,7 +115,13 @@ export function applySearchReplaceToField(fieldContent, searchText, replaceText)
     function findFuzzyRange(srcText, queryText, minScore = 0.72) {
         const srcTokens = getTokensWithOffsets(srcText);
         const queryTokens = queryText.toLowerCase().match(/[a-zA-Z0-9\u00C0-\u00FF]+/g) || [];
-        if (!queryTokens.length || !srcTokens.length) return null;
+
+        if (!queryTokens.length) {
+            const litIdx = srcText.indexOf(queryText.trim());
+            if (litIdx !== -1) return { start: litIdx, end: litIdx + queryText.trim().length, score: 1.0 };
+            return null;
+        }
+        if (!srcTokens.length) return null;
 
         let bestScore = 0;
         let bestStartIdx = -1;
@@ -144,9 +150,41 @@ export function applySearchReplaceToField(fieldContent, searchText, replaceText)
         }
 
         if (bestScore >= minScore) {
-            return { start: srcTokens[bestStartIdx].start, end: srcTokens[bestEndIdx].end, score: bestScore };
+            let startPos = srcTokens[bestStartIdx].start;
+            let endPos = srcTokens[bestEndIdx].end;
+
+            const qLower = queryText.toLowerCase();
+            const lastQTok = queryTokens[queryTokens.length - 1];
+            const lastTokIdx = qLower.lastIndexOf(lastQTok);
+            if (lastTokIdx !== -1) {
+                const trailMatch = queryText.slice(lastTokIdx + lastQTok.length).match(/^[^a-zA-Z0-9\u00C0-\u00FF]+/);
+                if (trailMatch && srcText.slice(endPos, endPos + trailMatch[0].length) === trailMatch[0]) {
+                    endPos += trailMatch[0].length;
+                }
+            }
+
+            const firstQTok = queryTokens[0];
+            const firstTokIdx = qLower.indexOf(firstQTok);
+            if (firstTokIdx > 0) {
+                const leadMatch = queryText.slice(0, firstTokIdx).match(/[^a-zA-Z0-9\u00C0-\u00FF]+$/);
+                if (leadMatch && srcText.slice(startPos - leadMatch[0].length, startPos) === leadMatch[0]) {
+                    startPos -= leadMatch[0].length;
+                }
+            }
+
+            return { start: startPos, end: endPos, score: bestScore };
         }
         return null;
+    }
+
+    if (srch.trim()) {
+        const exactIdx = src.indexOf(srch.trim());
+        if (exactIdx !== -1) {
+            return {
+                result: src.slice(0, exactIdx) + repl + src.slice(exactIdx + srch.trim().length),
+                matched: true
+            };
+        }
     }
 
     let sepIdx = srch.indexOf(' || ');
@@ -157,7 +195,7 @@ export function applySearchReplaceToField(fieldContent, searchText, replaceText)
     if (sepIdx !== -1 && sepIdx > 0 && srch.length - sepIdx - sepLen > 0) {
         const startPart = srch.slice(0, sepIdx).trim();
         const endPart = srch.slice(sepIdx + sepLen).trim();
-        
+
         if (startPart && endPart) {
             const startMatch = findFuzzyRange(src, startPart);
             if (startMatch) {

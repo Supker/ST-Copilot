@@ -51,10 +51,16 @@
         <input type="range" id="scp-depth-slider" class="scp-slider scp-depth-slider" min="0" max="100" step="1" value="15">
         <span class="scp-depth-val scp-depth-clickable" id="scp-depth-val" title="Click to enter exact value">15</span>
         <div class="scp-toolbar-sep"></div>
-        <button class="scp-tbtn" id="scp-lb-btn" title="Lorebook Manager">${I.book}</button>
         <div class="scp-pick-wrap">
             <button class="scp-tbtn" id="scp-pick-btn" title="Pick specific chat messages for context (replaces Ctx slider)">${I.pick}</button>
             <span class="scp-pick-badge" id="scp-pick-badge" style="display:none"></span>
+        </div>
+        <div class="scp-menu-dropdown" id="scp-menu-dropdown">
+            <button class="scp-tbtn" id="scp-menu-trigger" title="Menu">${I.menu}</button>
+            <div class="scp-menu-panel" id="scp-menu-panel">
+                <button class="scp-menu-item" id="scp-menu-lb-item">${I.book}<span>Lorebook Manager</span></button>
+                <button class="scp-menu-item" id="scp-menu-char-item">${I.user}<span>Character Manager</span></button>
+            </div>
         </div>
     </div>
 

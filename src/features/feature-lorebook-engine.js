@@ -8,6 +8,22 @@ export const wiCache = {};
 export const wiPromises = {}; 
 export let lastActiveEntries = [];
 
+let _wiExternalListenerBound = false;
+export function setupExternalWIChangeListener() {
+    if (_wiExternalListenerBound) return;
+    _wiExternalListenerBound = true;
+    const ctx = SillyTavern.getContext();
+    const es = ctx.eventSource || window.eventSource;
+    const et = ctx.event_types || window.event_types || {};
+    if (!es) return;
+    es.on(et.WORLDINFO_UPDATED || 'worldinfo_updated', (name) => {
+        if (name) delete wiCache[name];
+    });
+    es.on(et.WORLDINFO_SETTINGS_UPDATED || 'worldinfo_settings_updated', () => {
+        for (const key of Object.keys(wiCache)) delete wiCache[key];
+    });
+}
+
 export async function fetchWorldInfoBook(name) {
     if (name === EMBEDDED_BOOK_KEY) return getEmbeddedCharBook();
     
@@ -51,53 +67,61 @@ export function getEmbeddedCharBook() {
     const char = ctx.characters?.[ctx.characterId];
     const book = char?.data?.character_book;
     if (!book?.entries?.length) return null;
+    
     const data = { entries: {}, _embedded: true, _ts: Date.now() };
+
     (book.entries || []).forEach((e, idx) => {
         const uid = e.id ?? idx;
+        const keys = Array.isArray(e.keys) ? e.keys : (e.key || []);
+        const outlet = e.automation_id || e.automationId || e.extensions?.outlet_name || e.outletName || e.outlet_name || e.outlet || '';
+        const isOutlet = Boolean(outlet); 
+        const isForceConstant = e.selective === false; 
+
         data.entries[uid] = {
             uid,
-            key: Array.isArray(e.keys) ? e.keys : (e.key || []),
-            keysecondary: e.secondary_keys || e.keysecondary || [],
+            key: keys,
+            keysecondary: [],
             content: e.content || '',
-            comment: e.name || e.comment || '',
-            disable: e.enabled === false,
-            constant: !!e.constant,
-            selective: !!e.selective,
-            position: e.position ?? 0,
+            comment: e.name || '',
+            disable: false,
+            selective: true,
+            constant: !isOutlet && (e.constant === true || isForceConstant),
+            position: isOutlet ? 7 : (e.position ?? 0),
             displayIndex: uid,
-            automation_id: e.automation_id || e.automationId || '',
-            outletName: e.extensions?.outlet_name || e.outletName || e.outlet_name || e.outlet || '',
+            automation_id: outlet,
+            outletName: outlet,
             outlet: e.outlet || e.outlet_name || e.outletName || '',
-            group: e.group || '',
-            role: e.role ?? null,
-            extensions: e.extensions || {},
+            group: e.group || (isOutlet ? outlet : ''),
+            role: null,
+            extensions: { outlet_name: outlet },
             order: e.order ?? 100,
             probability: e.probability ?? 100,
             groupWeight: e.groupWeight ?? 100,
-            depth: e.depth ?? 4,
-            useProbability: e.useProbability ?? true,
-            addMemo: e.addMemo ?? true,
-            groupOverride: e.groupOverride ?? false,
-            sticky: e.sticky ?? 0,
-            cooldown: e.cooldown ?? 0,
-            delay: e.delay ?? 0,
-            excludeRecursion: e.excludeRecursion ?? false,
-            preventRecursion: e.preventRecursion ?? false,
-            delayUntilRecursion: e.delayUntilRecursion ?? false,
-            ignoreBudget: e.ignoreBudget ?? false,
-            vectorized: e.vectorized ?? false,
-            scanDepth: e.scanDepth ?? null,
-            caseSensitive: e.caseSensitive ?? null,
-            matchWholeWords: e.matchWholeWords ?? null,
-            useGroupScoring: e.useGroupScoring ?? null,
-            matchPersonaDescription: e.matchPersonaDescription ?? false,
-            matchCharacterDescription: e.matchCharacterDescription ?? false,
-            matchCharacterPersonality: e.matchCharacterPersonality ?? false,
-            matchCharacterDepthPrompt: e.matchCharacterDepthPrompt ?? false,
-            matchScenario: e.matchScenario ?? false,
-            matchCreatorNotes: e.matchCreatorNotes ?? false
+            depth: 4,
+            useProbability: true,
+            addMemo: true,
+            groupOverride: false,
+            sticky: 0,
+            cooldown: 0,
+            delay: 0,
+            excludeRecursion: false,
+            preventRecursion: false,
+            delayUntilRecursion: false,
+            ignoreBudget: false,
+            vectorized: false,
+            scanDepth: null,
+            caseSensitive: null,
+            matchWholeWords: null,
+            useGroupScoring: null,
+            matchPersonaDescription: false,
+            matchCharacterDescription: false,
+            matchCharacterPersonality: false,
+            matchCharacterDepthPrompt: false,
+            matchScenario: false,
+            matchCreatorNotes: false
         };
     });
+
     return data;
 }
 
@@ -245,11 +269,11 @@ export function getKeywordTriggeredEntries(allBooksData, text1, text2) {
 }
 
 export function getEntryOverrideKey(bookName, entry) {
-    let entryName = (entry.comment || entry.name || '').trim();
+    let entryName = String(entry.comment || entry.name || '').trim();
     if (!entryName && entry.key && entry.key.length) {
         entryName = entry.key.join('_').slice(0, 40);
     }
-    entryName = entryName.replace(/[\r\n]+/g, ' ').trim();
+    entryName = String(entryName).replace(/[\r\n]+/g, ' ').trim();
     return entryName ? `${bookName}_${entryName}` : `${bookName}_${entry.uid}`;
 }
 

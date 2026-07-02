@@ -1,4 +1,4 @@
-import { CHANGELOG, EXT_DISPLAY, I, DEFAULT_CHAR_EDIT_DIRECTIVE, DEFAULT_LB_MANAGE_PROMPT, DEFAULT_CHAT_EDIT_DIRECTIVE } from '../constants.js';
+import { CHANGELOG, EXT_DISPLAY, I, DEFAULT_CHAR_EDIT_DIRECTIVE, DEFAULT_LB_MANAGE_PROMPT, DEFAULT_CHAT_EDIT_DIRECTIVE, QP_ICON_POOL } from '../constants.js';
 import { getSettings, saveSettings, getCurrentSession, getBindingKey, isMessageStarred, toggleStarMessage, getStarredMessages } from '../session.js';
 import { escHtml, showCustomDialog, copyText, autoResize } from '../utils/util-dom.js';
 import { _dbgAdd } from '../utils/util-debug.js';
@@ -8,15 +8,6 @@ import { assembleMessages } from '../api.js';
 import { state } from '../state.js';
 
 // ─── Quick Prompts ───────────────────────────────────────────────────────────
-
-const QP_ICON_POOL = [
-    '🔍','💡','📋','✨','🎭','📖','🗺️','⚔️','🧠','💬',
-    '🎯','🔮','📝','🌍','❓','🎨','💭','🔥','⚡','🎲',
-    '👁️','🧩','📚','🗣️','💫','🌟','🎬','🧪','🏆','🎵',
-    '🌙','☀️','🌊','🍃','💎','🛡️','🗡️','🏰','🐉','🦋',
-    '🎪','🌀','🔑','💀','🌹','🍷','🎩','🧿','🔔','⭐',
-    '🐺','🦊','🐦','🌸','🍄','🔴','🟣','🔵','🟡','🟢',
-];
 
 export function renderQuickPromptsBar() {
     const bar = document.getElementById('scp-qp-bar');
@@ -711,29 +702,58 @@ export function closeFavoritesPanel() {
 // ─── Context Inspector ──────────────────────────────────────────────────────
 
 export function _highlightContextText(raw) {
-    const events = [];
-    const masterRe = /(```[\s\S]*?(?:```|$))|(`[^`\n]*`)|(<\/?[\w:{}_-][\w:{}_.\s"'/=-]*(?:\s[^>]*)?>|<!--[\s\S]*?-->)|(\{\{[^}\n]+\}\})/gi;
+    const masterRe = /(```[\s\S]*?(?:```|$))|(`[^`\n]*`)|(<\/?([\w:{}_-]+)[^>]*>|<!--[\s\S]*?-->)|(\{\{[^}\n]+\}\})/gi;
     
     let m;
     masterRe.lastIndex = 0;
+    let tempEvents = [];
     while ((m = masterRe.exec(raw)) !== null) {
-        if (m[1] !== undefined) {
-            events.push([m.index, masterRe.lastIndex, 'code_block', m[1]]);
-        } else if (m[2] !== undefined) {
-            events.push([m.index, masterRe.lastIndex, 'inline_code', m[2]]);
-        } else if (m[3] !== undefined) {
-            events.push([m.index, masterRe.lastIndex, 'tag', m[3]]);
-        } else if (m[4] !== undefined) {
-            events.push([m.index, masterRe.lastIndex, 'macro', m[4]]);
+        if (m[1] !== undefined) tempEvents.push({ start: m.index, end: masterRe.lastIndex, type: 'code_block', match: m[1] });
+        else if (m[2] !== undefined) tempEvents.push({ start: m.index, end: masterRe.lastIndex, type: 'inline_code', match: m[2] });
+        else if (m[3] !== undefined) tempEvents.push({ start: m.index, end: masterRe.lastIndex, type: 'tag', match: m[3], tagName: m[4] });
+        else if (m[5] !== undefined) tempEvents.push({ start: m.index, end: masterRe.lastIndex, type: 'macro', match: m[5] });
+    }
+
+    const openStacks = {};
+    const validTags = new Set();
+
+    for (let i = 0; i < tempEvents.length; i++) {
+        const ev = tempEvents[i];
+        if (ev.type === 'tag') {
+            const match = ev.match;
+            if (match.startsWith('<!--') || match.endsWith('/>')) {
+                validTags.add(ev.start);
+            } else {
+                const isClose = match.startsWith('</');
+                const tagName = ev.tagName;
+                if (!tagName) continue;
+
+                if (isClose) {
+                    if (openStacks[tagName] && openStacks[tagName].length > 0) {
+                        const openEvIndex = openStacks[tagName].pop();
+                        validTags.add(tempEvents[openEvIndex].start);
+                        validTags.add(ev.start);
+                    }
+                } else {
+                    if (!openStacks[tagName]) openStacks[tagName] = [];
+                    openStacks[tagName].push(i);
+                }
+            }
         }
     }
 
+    const events = [];
+    for (const ev of tempEvents) {
+        if (ev.type === 'tag' && !validTags.has(ev.start)) continue;
+        events.push([ev.start, ev.end, ev.type, ev.match, ev.tagName]);
+    }
+
     let html = '', last = 0;
-    const KNOWN = new Set(['system_prompt','character_information','lorebook_context','st_system_prompt','persistent_memory','summary_context','lorebook_management','character_management','chat_messages_editing','roleplay_context','entity_definitions','persona_configuration','operational_guidelines','{{user}}_persona', 'tool_calls_system', 'memory_system']);
-
+    const KNOWN = new Set(['system_prompt','character_information','characters','character','lorebook_context','st_system_prompt','persistent_memory','summary_context','lorebook_management','character_management','chat_messages_editing','roleplay_context','entity_definitions','persona_configuration','operational_guidelines','{{user}}_persona', 'tool_calls_system', 'memory_system']);
     let currentDepth = 0;
+    let emittedAnchors = new Set();
 
-    for (const [start, end, type, match] of events) {
+    for (const [start, end, type, match, tagName] of events) {
         if (start < last) continue;
         html += escHtml(raw.slice(last, start));
         
@@ -753,9 +773,13 @@ export function _highlightContextText(raw) {
                 currentDepth++;
             }
 
-            const openTag = match.match(/^<([\w:{}_-]+)>$/);
-            if (openTag && KNOWN.has(openTag[1])) {
-                html += `<span id="scp-ctx-sec-${openTag[1]}" class="scp-ctx-anchor"></span>`;
+            if (!isClose && !isComment && !isSelfClose && tagName) {
+                if (KNOWN.has(tagName) || tagName.endsWith('_persona')) {
+                    if (!emittedAnchors.has(tagName)) {
+                        emittedAnchors.add(tagName);
+                        html += `<span id="scp-ctx-sec-${tagName}" class="scp-ctx-anchor"></span>`;
+                    }
+                }
             }
             
             const depthClass = Math.min(applyDepth, 5);
@@ -776,7 +800,7 @@ export function _buildContextInspectorHTML(messages) {
         'system_prompt': 'System Prompt', 
         'persistent_memory': 'Persistent Memory',
         'lorebook_context': 'Lorebook', 
-        'character_information': 'Character',
+        'characters': 'Characters',
         '{{user}}_persona': 'User Persona',
         'memory_system': 'Memory Management',
         'lorebook_management': 'Lorebook Management',
@@ -785,6 +809,22 @@ export function _buildContextInspectorHTML(messages) {
         'tool_calls_system': 'Tool Calls'
     };
     const KNOWN_SECS = new Set(Object.keys(SECTION_LABELS));
+    const ALIASES = {
+        'character_information': 'characters',
+        'character': 'characters'
+    };
+    const DISPLAY_ORDER = [
+        'system_prompt',
+        'persistent_memory',
+        'lorebook_context',
+        'characters',
+        '{{user}}_persona',
+        'memory_system',
+        'lorebook_management',
+        'character_management',
+        'chat_messages_editing',
+        'tool_calls_system'
+    ];
 
     let navHtml = '', bodyHtml = '';
     let seenSections = new Set();
@@ -806,23 +846,52 @@ export function _buildContextInspectorHTML(messages) {
         navHtml += `<button class="scp-ctx-nav-btn scp-ctx-nav-${displayRole}" data-t="${blockId}">${escHtml(label)}</button>`;
 
         if (msg.role === 'system') {
-            const tagRe = /<([\w:{}_-]+)>/g;
+            const tagRe = /<([\w:{}_-]+)[^>]*>/g;
             let tm;
             tagRe.lastIndex = 0;
-            let moduleNavs = '';
+            let foundMain = [];
+            let foundModules = [];
+
             while ((tm = tagRe.exec(raw)) !== null) {
-                if (KNOWN_SECS.has(tm[1]) && !seenSections.has(tm[1])) {
-                    seenSections.add(tm[1]);
-                    const secLabel = SECTION_LABELS[tm[1]] || tm[1];
-                    const secId = `scp-ctx-sec-${tm[1]}`;
+                let rawTag = tm[1];
+                let tag = ALIASES[rawTag] ? ALIASES[rawTag] : rawTag;
+                
+                const isUserPersona = tag === '{{user}}_persona' || tag.endsWith('_persona');
+                const key = isUserPersona ? '{{user}}_persona' : tag;
+
+                if ((KNOWN_SECS.has(key) || isUserPersona) && !seenSections.has(key)) {
+                    seenSections.add(key);
+                    const secLabel = SECTION_LABELS[key] || (isUserPersona ? 'User Persona' : key);
+                    const secId = `scp-ctx-sec-${rawTag}`;
                     
-                    if (['memory_system','lorebook_management','character_management','chat_messages_editing', 'tool_calls_system'].includes(tm[1])) {
-                        moduleNavs += `<button class="scp-ctx-nav-btn scp-ctx-nav-sub" data-t="${secId}">&nbsp;&nbsp;◦ ${escHtml(secLabel)}</button>`;
+                    if (['memory_system','lorebook_management','character_management','chat_messages_editing', 'tool_calls_system'].includes(key)) {
+                        foundModules.push({ key, id: secId, label: secLabel });
                     } else {
-                        navHtml += `<button class="scp-ctx-nav-btn scp-ctx-nav-sub" data-t="${secId}">&nbsp;&nbsp;◦ ${escHtml(secLabel)}</button>`;
+                        foundMain.push({ key, id: secId, label: secLabel });
                     }
                 }
             }
+
+            const sortFn = (a, b) => {
+                let idxA = DISPLAY_ORDER.indexOf(a.key);
+                let idxB = DISPLAY_ORDER.indexOf(b.key);
+                if (idxA === -1) idxA = 999;
+                if (idxB === -1) idxB = 999;
+                return idxA - idxB;
+            };
+
+            foundMain.sort(sortFn);
+            foundModules.sort(sortFn);
+
+            foundMain.forEach(item => {
+                navHtml += `<button class="scp-ctx-nav-btn scp-ctx-nav-sub" data-t="${item.id}">&nbsp;&nbsp;◦ ${escHtml(item.label)}</button>`;
+            });
+
+            let moduleNavs = '';
+            foundModules.forEach(item => {
+                moduleNavs += `<button class="scp-ctx-nav-btn scp-ctx-nav-sub" data-t="${item.id}">&nbsp;&nbsp;◦ ${escHtml(item.label)}</button>`;
+            });
+
             if (moduleNavs) {
                  navHtml += `<details class="scp-ctx-nav-details" open><summary class="scp-ctx-nav-btn" style="color:var(--scp-text)">▼ Modules</summary>${moduleNavs}</details>`;
             }

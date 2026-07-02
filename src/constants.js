@@ -116,6 +116,13 @@ To maximize semantic density and prevent AI hallucinations, you MUST adhere to t
 
 </character_architecture>
 
+<group_chat_protocol>
+This roleplay may involve a single character (solo chat) or several (group chat). Active characters are listed as \`<character name="ExactName">\` blocks inside \`<character_information>\`.
+
+MANDATORY: every tag you output in the \`character-changes\` block below MUST carry a \`char="ExactName"\` attribute — copied character-for-character from that name — even in solo chats with a single character. Never omit it. Never invent a name absent from context. This is routing metadata; it is NOT subject to the macro rule below (use the real name here, never \`{{char}}\`/\`{{user}}\` — \`{{char}}\` in the format example below is only a documentation placeholder).
+
+If multiple characters need changes, output one tag PER character PER field — never merge edits for two characters into a single tag.
+</group_chat_protocol>
 
 <edit_syntax>
 - \`overwrite\`: Full rewrite.
@@ -123,6 +130,7 @@ To maximize semantic density and prevent AI hallucinations, you MUST adhere to t
 - \`replace\`: Surgical patch. Use Boundary Anchor: "3-4 Start Words || 3-4 End Words". 
   * BAD: "The quick brown fox jumps over the lazy dog."
   * GOOD: "The quick brown || lazy dog."
+- Every tag above requires \`char="ExactName"\` per <group_chat_protocol>.
 </edit_syntax>
 
 <the_macro_imperative>
@@ -192,21 +200,21 @@ Triggers field rules:
 - Provide an array to set new triggers`;
 
 export const CHAR_EDIT_FORMAT_BLOCK = `\`\`\`character-changes
-<replace field="FIELD_NAME">
+<replace char="char_name" field="FIELD_NAME">
 <<<<<<< ANCHOR
 first || last
 =======
 replacement text
 >>>>>>> REPLACE
 </replace>
-<overwrite field="FIELD_NAME">Complete replacement content for this field</overwrite>
-<prepend field="FIELD_NAME">Text to insert at the very beginning of the field</prepend>
-<append_text field="FIELD_NAME">Text to append at the very end of the field</append_text>
+<overwrite char="char_name" field="FIELD_NAME">Complete replacement content for this field</overwrite>
+<prepend char="char_name" field="FIELD_NAME">Text to insert at the very beginning of the field</prepend>
+<append_text char="char_name" field="FIELD_NAME">Text to append at the very end of the field</append_text>
 
 <!-- ALTERNATE GREETINGS OPERATIONS -->
-<append field="alternate_greetings">New alternate greeting to add as a NEW entry</append>
-<overwrite field="alternate_greetings" index="1">Complete rewrite of the EXISTING greeting with id="1"</overwrite>
-<replace field="alternate_greetings" index="2">
+<append char="char_name" field="alternate_greetings">New alternate greeting to add as a NEW entry</append>
+<overwrite char="char_name" field="alternate_greetings" index="1">Complete rewrite of the EXISTING greeting with id="1"</overwrite>
+<replace char="char_name" field="alternate_greetings" index="2">
 <<<<<<< ANCHOR
 first || last
 =======
@@ -287,6 +295,19 @@ export const TOOL_CALL_FORMAT_BLOCK = `\`\`\`tool_call\n{"name": "tool_name","in
 
     // ─── Changelog Data ──────────────────────────────────────────────────────────
 export const CHANGELOG = [
+    {
+        version: '2.9.0',
+        date: '7/2/2026',
+        announce: true,
+        notes: [
+            '<strong>Character Manager</strong> — New interface to edit character fields and configure per-character context inclusion rules.',
+            '<strong>Group Chat Editing</strong> — Enabled the ability for Copilot to identify and edit individual characters within group sessions.',
+            '<strong>New Tools Menu</strong> — Replaced the tools panel with a burger menu for streamlined access to Lorebook and Character managers.',
+            '<strong>Local Layouts</strong> — Window dimensions and positions are now stored in the browser instead of the server.',
+            '<strong>UI Fixes</strong> — Resolved Z-index issues with the "New Session" window and fixed chat auto-scrolling jumping upwards.',
+            '<strong>Bug Fixes</strong> — Patched various issues in Proposed Changes, along with general API and interface stability improvements.'
+        ],
+    },
     {
         version: '2.8.3',
         date: '6/20/2026',
@@ -819,6 +840,8 @@ export const I = {
         chevronRight: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>`,
         chatEdit: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h8a2 2 0 0 1 2 2v5Z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></svg>`,
         paperclip: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`,
+        menu: `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>`,
+        lock: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`,
     };
 
 export const QP_ICON_POOL = [

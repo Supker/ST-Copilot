@@ -1284,4 +1284,16 @@ export function setupLorebookManagerListeners() {
             import('../ui/ui-chat.js').then(m => m.updateMsgCount(getCurrentSession()));
         });
     });
+
+    const ctx = SillyTavern.getContext();
+    const es = ctx.eventSource || window.eventSource;
+    const et = ctx.event_types || window.event_types || {};
+    es?.on?.(et.WORLDINFO_UPDATED || 'worldinfo_updated', (name) => {
+        const overlay = document.getElementById('scp-lb-overlay');
+        if (!overlay || overlay.style.display === 'none') return;
+        refreshLorebookList();
+        if (state.lbActiveBook && name === state.lbActiveBook) {
+            renderEntryList(state.lbActiveBook, state.lbSearchQuery);
+        }
+    });
 }

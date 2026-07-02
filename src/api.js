@@ -54,11 +54,15 @@ export async function buildSystemContent(settings) {
     if (lbBlock) parts.push(lbBlock);
 
     {
-        const editXml = buildCharacterContextBlock(settings);
+    const editXml = buildCharacterContextBlock(settings);
+    if (ctx.groupId) {
+        if (editXml) parts.push('\n\n' + editXml);
+    } else {
         let inner = `Name: ${charInfo ? charInfo.name : (ctx.name2 || 'Character')}\n`;
         if (editXml) inner += '\n' + editXml;
         parts.push(`\n\n<character_information>\n${inner}\n</character_information>`);
     }
+}
 
     {
         const userName = ctx.name1 || 'User';
@@ -90,7 +94,8 @@ export async function buildSystemContent(settings) {
 
     const modules = [memoryAIInstr, aiInstructions, charEditDirective, chatEditDirective, toolsBlock].filter(Boolean);
     if (modules.length > 0) {
-        parts.push(`\n\n<modules>\n${modules.join('\n\n')}\n</modules>`);
+        const reminder = `\n\n[SYSTEM REMINDER: If you intend to modify anything you MUST write the appropriate structured markdown block containing your instructions. The system strictly relies on these blocks to parse and apply your changes automatically. Simply describing your changes in plain text without outputting the corresponding markdown block will result in failure to apply them.]`;
+        parts.push(`\n\n<modules>\n${modules.join('\n\n')}${reminder}\n</modules>`);
     }
 
     return parts.join('\n');
@@ -98,7 +103,10 @@ export async function buildSystemContent(settings) {
 
 export function _buildAiContextForHistoryMsg(msg) {
     try {
-        const lines = msg.swipes?.[msg.swipeIndex || 0]?.historyLines || msg.appliedLines || [];
+        const swipe = msg.swipes?.[msg.swipeIndex || 0];
+        const lines = swipe?.historyLines || msg.appliedLines || [];
+        const charName = swipe?._charName || msg._charName || null;
+
         const entries = lines.map(line => {
             const plain = line.replace(/\*\*/g, '').replace(/`/g, '');
             const statusMatch = plain.match(/^[✓✕·]\s+(ACCEPTED|REJECTED|DISMISSED[^:]*)/);
@@ -107,16 +115,12 @@ export function _buildAiContextForHistoryMsg(msg) {
             const detail = restMatch ? restMatch[1].trim() : plain;
             return { status, detail };
         });
-        
+
         const ctg = msg.isCharEditHistory ? 'character_card_changes' : (msg.isChatEditHistory ? 'chat_messages_edits' : 'lorebook_changes');
-        
-        const obj = {
-            type: 'system_notification',
-            category: ctg,
-            entries,
-        };
-        const jsonStr = JSON.stringify(obj, null, 2);
-        return `${jsonStr}\n\n[System Note: Your generated \`${ctg}\` code block has been deleted to save tokens. This message indicates the user's actions and decisions regarding your proposed changes. You didn't miss anything and you wrote everything correctly in your message. You don't need to write this code block again]`;
+        const obj = { type: 'system_notification', category: ctg, entries };
+        if (charName) obj.character = charName;
+
+        return `${JSON.stringify(obj)}\n\n[System Note: \`${ctg}\` block deleted to save tokens. DO NOT regenerate it. Proceed with user's next request.]`;
     } catch (_) {
         return msg.content || '';
     }
@@ -511,17 +515,14 @@ export async function callGenerate(session, settings, pendingText, onChunk) {
     }
 
     const service = ctx.ConnectionManagerRequestService;
-    if (!service || typeof service.sendRequest !== 'function') {
-        throw new Error('ConnectionManagerRequestService not available. Please ensure the Connection Manager extension is enabled in SillyTavern.');
-    }
-
     let profiles = [];
-    if (typeof service.getSupportedProfiles === 'function') {
+    if (service && typeof service.getSupportedProfiles === 'function') {
         profiles = service.getSupportedProfiles();
     } else {
         profiles = ctx.extensionSettings?.connectionManager?.profiles || [];
     }
 
+    let useConnectionManager = false;
     let profileId = null;
 
     if (settings.connectionSource === 'profile') {
@@ -531,24 +532,24 @@ export async function callGenerate(session, settings, pendingText, onChunk) {
             );
             if (found) {
                 profileId = found.id;
+                useConnectionManager = true;
             } else {
                 throw new Error(`Connection profile "${settings.connectionProfileId}" not found. Available: ${profiles.map(p => p.name).join(', ') || 'None'}`);
             }
         } else {
             throw new Error('No profile selected in ST-Copilot settings.');
         }
-    } else {
-        profileId = ctx.extensionSettings?.connectionManager?.selectedProfile;
-        if (!profileId) {
-            const domSelect = document.getElementById('connection_profiles');
-            if (domSelect && domSelect.value) {
-                profileId = domSelect.value;
-            }
+    } else if (settings.connectionSource !== 'custom') {
+        const domSelect = document.getElementById('connection_profiles');
+        if (domSelect && domSelect.value) {
+            profileId = domSelect.value;
+        } else if (ctx.extensionSettings?.connectionManager?.selectedProfile) {
+            profileId = ctx.extensionSettings.connectionManager.selectedProfile;
         }
-    }
-
-    if (!profileId) {
-        throw new Error('No active profile found. Please select a profile in the SillyTavern Connection Manager UI, or assign a specific profile in ST-Copilot settings.');
+        
+        if (profileId) {
+            useConnectionManager = true;
+        }
     }
 
     let asyncGeneratorFn;
@@ -575,14 +576,9 @@ export async function callGenerate(session, settings, pendingText, onChunk) {
                 if (reqBody.request_image_resolution === '') { delete reqBody.request_image_resolution; changed = true; }
                 if (reqBody.request_image_aspect_ratio === '') { delete reqBody.request_image_aspect_ratio; changed = true; }
 
-                if (reqBody.chat_completion_source === 'zai' || (reqBody.model && reqBody.model.toLowerCase().includes('glm'))) {
-                    if (reqBody.top_p > 1) { reqBody.top_p = 1.00; changed = true; }
-                    if (reqBody.top_p <= 0) { reqBody.top_p = 0.01; changed = true; }
-                    if (reqBody.temperature <= 0) { reqBody.temperature = 0.01; changed = true; }
-                    if (reqBody.temperature > 1) { reqBody.temperature = 1.00; changed = true; }
+                if (reqBody.chat_completion_source === 'zai' || (typeof reqBody.model === 'string' && reqBody.model.toLowerCase().includes('glm'))) {
                     if (reqBody.reasoning_effort !== undefined) { delete reqBody.reasoning_effort; changed = true; }
                     if (reqBody.reasoning !== undefined) { delete reqBody.reasoning; changed = true; }
-                    if (reqBody.max_tokens > 8192) { reqBody.max_tokens = 8192; changed = true; }
                     if (Array.isArray(reqBody.messages)) {
                         reqBody.messages.forEach(m => { if (m.name !== undefined) { delete m.name; changed = true; } });
                     }
@@ -595,32 +591,74 @@ export async function callGenerate(session, settings, pendingText, onChunk) {
     };
 
     try {
-        asyncGeneratorFn = await service.sendRequest(profileId, messages, maxTokens, {
-            stream: useStream,
-            signal: abort.signal,
-            extractData: false,
-            includePreset: true
-        });
+        if (useConnectionManager && service && typeof service.sendRequest === 'function') {
+            asyncGeneratorFn = await service.sendRequest(profileId, messages, maxTokens, {
+                stream: useStream,
+                signal: abort.signal,
+                extractData: false,
+                includePreset: true
+            });
+        } else {
+            const mainApi = window.main_api || ctx.main_api;
+            if (mainApi === 'openai' && ctx.ChatCompletionService) {
+                const oaiSettings = window.oai_settings || ctx.oai_settings || {};
+                asyncGeneratorFn = await ctx.ChatCompletionService.processRequest({
+                    messages: messages,
+                    max_tokens: maxTokens,
+                    stream: useStream
+                }, { presetName: oaiSettings.preset_settings_openai }, false, abort.signal);
+            } else if (mainApi === 'textgenerationwebui' && ctx.TextCompletionService) {
+                const textGenSettings = window.textgenerationwebui_settings || ctx.textgenerationwebui_settings || {};
+                asyncGeneratorFn = await ctx.TextCompletionService.processRequest({
+                    prompt: messages,
+                    max_tokens: maxTokens,
+                    stream: useStream
+                }, { presetName: textGenSettings.preset_settings_textgenerationwebui }, false, abort.signal);
+            } else {
+                throw new Error('No active API connection found. Please select a profile in Connection Manager or configure the main API.');
+            }
+        }
     } catch (e) {
         if (useStream && !abort.signal.aborted && e?.name !== 'AbortError' && e?.message !== 'userStopped') {
             console.warn(`[${EXT_DISPLAY}] Streaming failed, falling back to non-streaming:`, e);
             _dbgAdd('GEN_STREAM_FALLBACK', { error: e.message || String(e) });
             useStream = false;
             try {
-                asyncGeneratorFn = await service.sendRequest(profileId, messages, maxTokens, {
-                    stream: false,
-                    signal: abort.signal,
-                    extractData: false,
-                    includePreset: true
-                });
+                if (useConnectionManager && service && typeof service.sendRequest === 'function') {
+                    asyncGeneratorFn = await service.sendRequest(profileId, messages, maxTokens, {
+                        stream: false,
+                        signal: abort.signal,
+                        extractData: false,
+                        includePreset: true
+                    });
+                } else {
+                    const mainApi = window.main_api || ctx.main_api;
+                    if (mainApi === 'openai' && ctx.ChatCompletionService) {
+                        const oaiSettings = window.oai_settings || ctx.oai_settings || {};
+                        asyncGeneratorFn = await ctx.ChatCompletionService.processRequest({
+                            messages: messages,
+                            max_tokens: maxTokens,
+                            stream: false
+                        }, { presetName: oaiSettings.preset_settings_openai }, false, abort.signal);
+                    } else if (mainApi === 'textgenerationwebui' && ctx.TextCompletionService) {
+                        const textGenSettings = window.textgenerationwebui_settings || ctx.textgenerationwebui_settings || {};
+                        asyncGeneratorFn = await ctx.TextCompletionService.processRequest({
+                            prompt: messages,
+                            max_tokens: maxTokens,
+                            stream: false
+                        }, { presetName: textGenSettings.preset_settings_textgenerationwebui }, false, abort.signal);
+                    }
+                }
             } catch (err2) {
                 state.abortController = null;
                 if (abort.signal.aborted || err2?.name === 'AbortError' || err2?.message === 'userStopped') return null;
+                if (err2.cause) err2.message = `${err2.message} — CAUSE: ${err2.cause.message || String(err2.cause)}`;
                 throw err2;
             }
         } else {
             state.abortController = null;
             if (abort.signal.aborted || e?.name === 'AbortError' || e?.message === 'userStopped') return null;
+            if (e.cause) e.message = `${e.message} — CAUSE: ${e.cause.message || String(e.cause)}`;
             throw e;
         }
     } finally {

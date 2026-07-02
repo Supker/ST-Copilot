@@ -3,12 +3,14 @@ import { state } from './state.js';
 import { getSettings, saveSettings, initChatBucket, getChatBucket, setActiveSession, deleteCurrentSession, getCurrentSession, exportCurrentSession, importSession, showSessionDialog } from './session.js';
 import { _dbgSetupGlobalErrorHandlers, _dbgAdd, dbgDownload, _dbgSnapshotSettings } from './utils/util-debug.js';
 import { showCustomDialog, escHtml, autoResize, copyText } from './utils/util-dom.js';
+import { setupExternalWIChangeListener } from './features/feature-lorebook-engine.js';
 
 import { restoreWindowState, applyCustomTheme, applyWindowBackground, hideWindow, showWindow, minimize, toggleVisibility, makeDraggable, makeResizable, makeIconDraggable, updateIconVisibility, toggleGhostMode, setupGhostHotkey, setupHotkey, bringWindowToFront } from './ui/ui-window.js';
 import { setupSettingsPanelListeners, setupSettingsHandlers, updateSettingsUI, updateProfilesList, updateSPConnProfileList, _takeProfileSnapshot, openSettingsPanel, syncOverlayUI } from './ui/ui-settings.js';
 import { setupLorebookManagerListeners, openLorebookManager } from './features/feature-lorebook-ui.js';
+import { setupCharacterManagerListeners, openCharacterManager } from './features/feature-character-manager-ui.js';
 import { updateMemoryDot } from './features/feature-memory.js';
-import { setupChatPickerListeners, onChatChanged, updateDepthSlidersMax, renderSession, openSearch, navigateSearch, performSearch, closeSearch, openChatPicker, toggleSearchWholeWord, setupDepthClickEdit, updateMsgCount, setupSearchHotkey } from './ui/ui-chat.js';
+import { setupChatPickerListeners, onChatChanged, updateDepthSlidersMax, renderSession, openSearch, navigateSearch, performSearch, closeSearch, openChatPicker, toggleSearchWholeWord, setupDepthClickEdit, updateMsgCount, setupSearchHotkey, setupMessagesScrollTracking } from './ui/ui-chat.js';
 import { checkChangelogAutoShow, setupChangelogListeners, openChangelog, openFavoritesPanel, closeFavoritesPanel, openInspector, renderQuickPromptsBar } from './ui/ui-widgets.js';
 import { _setupAttachButton } from './features/feature-attachments.js';
 
@@ -61,7 +63,7 @@ async function injectUI() {
             console.error(`[${EXT_DISPLAY}] Couldn't load HTML: ${templateName}.html`);
         }
     };
-    const templates = ['window', 'lorebook_manager', 'settings_overlay', 'chat_picker'];
+    const templates = ['window', 'lorebook_manager', 'character_manager', 'settings_overlay', 'chat_picker'];
     await Promise.all(templates.map(loadAndInject));
 
     const iconEl = document.getElementById(ICON_ID);
@@ -166,6 +168,7 @@ function attachWindowListeners() {
                               e.target.closest('.scp-dialog-overlay') ||
                               document.getElementById('scp-settings-overlay')?.contains(e.target) ||
                               document.getElementById('scp-lb-overlay')?.contains(e.target) ||
+                              document.getElementById('scp-char-overlay')?.contains(e.target) ||
                               document.getElementById('scp-picker-overlay')?.contains(e.target) ||
                               document.getElementById('scp-diff-modal')?.contains(e.target);
         state.copilotActive = !!clickedInside;
@@ -173,14 +176,19 @@ function attachWindowListeners() {
 
     window.addEventListener('resize', () => {
         if (windowEl && windowEl.style.display !== 'none') {
-            const r = windowEl.getBoundingClientRect();
-            const s = getSettings();
-            if (s.windowX !== null && s.windowY !== null) {
-                const maxLeft = Math.max(0, window.innerWidth - r.width);
-                const maxTop = Math.max(0, window.innerHeight - r.height);
-                windowEl.style.left = `${Math.max(0, Math.min(s.windowX, maxLeft))}px`;
-                windowEl.style.top = `${Math.max(0, Math.min(s.windowY, maxTop))}px`;
-            }
+            try {
+                const saved = localStorage.getItem('scp-win-pos');
+                if (saved) {
+                    const { x, y } = JSON.parse(saved);
+                    if (x != null) {
+                        const r = windowEl.getBoundingClientRect();
+                        const maxLeft = Math.max(0, window.innerWidth - r.width);
+                        const maxTop = Math.max(0, window.innerHeight - r.height);
+                        windowEl.style.left = `${Math.max(0, Math.min(x, maxLeft))}px`;
+                        windowEl.style.top = `${Math.max(0, Math.min(y, maxTop))}px`;
+                    }
+                }
+            } catch(e) {}
         }
         if (iconEl && iconEl.style.display !== 'none') {
             const vw = window.innerWidth;
@@ -224,6 +232,11 @@ function attachWindowListeners() {
         if (dd && !dd.contains(e.target)) {
             document.getElementById('scp-sess-panel')?.classList.remove('open');
             document.getElementById('scp-sess-trigger')?.classList.remove('open');
+        }
+        const menuDd = document.getElementById('scp-menu-dropdown');
+        if (menuDd && !menuDd.contains(e.target)) {
+            document.getElementById('scp-menu-panel')?.classList.remove('open');
+            document.getElementById('scp-menu-trigger')?.classList.remove('active');
         }
         if (!e.target.closest('.scp-lb-proposal-world-dd')) {
             document.querySelectorAll('.scp-lb-proposal-world-panel.open').forEach(p => {
@@ -307,15 +320,24 @@ function attachWindowListeners() {
         apiMod.runGenerate(sess, userMsg.content, false);
     });
 
-    const lbBtn = document.getElementById('scp-lb-btn');
-    if (lbBtn) {
-        let _lbTouchPending = false;
-        lbBtn.addEventListener('touchend', e => {
-            e.preventDefault(); _lbTouchPending = true; openLorebookManager();
-            setTimeout(() => { _lbTouchPending = false; }, 400);
-        }, { passive: false });
-        lbBtn.addEventListener('click', () => { if (!_lbTouchPending) openLorebookManager(); });
-    }
+    document.getElementById('scp-menu-trigger')?.addEventListener('click', e => {
+        e.stopPropagation();
+        const panel = document.getElementById('scp-menu-panel');
+        const trigger = document.getElementById('scp-menu-trigger');
+        const isOpen = panel.classList.contains('open');
+        panel.classList.toggle('open', !isOpen);
+        trigger.classList.toggle('active', !isOpen);
+    });
+    document.getElementById('scp-menu-lb-item')?.addEventListener('click', () => {
+        document.getElementById('scp-menu-panel')?.classList.remove('open');
+        document.getElementById('scp-menu-trigger')?.classList.remove('active');
+        openLorebookManager();
+    });
+    document.getElementById('scp-menu-char-item')?.addEventListener('click', () => {
+        document.getElementById('scp-menu-panel')?.classList.remove('open');
+        document.getElementById('scp-menu-trigger')?.classList.remove('active');
+        openCharacterManager();
+    });
 
     document.getElementById('scp-search-btn')?.addEventListener('click', () => { state.searchOpen ? closeSearch() : openSearch(); });
     document.getElementById('scp-pick-btn')?.addEventListener('click', () => openChatPicker());
@@ -498,11 +520,14 @@ async function init() {
     updateSettingsUI(); 
     setupSettingsPanelListeners(); 
     setupLorebookManagerListeners(); 
+    setupCharacterManagerListeners();
+    setupExternalWIChangeListener();
     setupChatPickerListeners(); 
     setupChangelogListeners();
     setupSearchHotkey();
     setupGhostHotkey();
     setupHotkey();
+    setupMessagesScrollTracking();
     
     const s = getSettings();
     const windowEl = document.getElementById(WIN_ID);
@@ -598,6 +623,7 @@ async function init() {
         windowEl, 
         document.getElementById('scp-settings-overlay'), 
         document.getElementById('scp-lb-overlay'), 
+        document.getElementById('scp-char-overlay'),
         document.getElementById('scp-picker-overlay')
     ].filter(Boolean).forEach(el => {
         el.addEventListener('mousedown', preventSpinBug);

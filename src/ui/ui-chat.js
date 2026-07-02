@@ -897,7 +897,42 @@ export function scrollToBottom() {
     const c = document.getElementById('scp-messages');
     if (!c) return;
     state.userScrolledUp = false;
-    c.scrollTop = c.scrollHeight;
+    
+    // Делаем несколько попыток скролла, если окно еще не отрендерилось (например, при загрузке страницы)
+    const tryScroll = (attempts = 0) => {
+        if (c.offsetHeight > 0) {
+            c.scrollTop = c.scrollHeight;
+        } else if (attempts < 5) {
+            setTimeout(() => tryScroll(attempts + 1), 50);
+        }
+    };
+    tryScroll();
+}
+
+export function saveScrollPosition() {
+    const c = document.getElementById('scp-messages');
+    // Сохраняем позицию ТОЛЬКО если окно сейчас открыто и отрендерено
+    if (c && c.offsetHeight > 0) {
+        state.savedScrollTop = c.scrollTop;
+    }
+}
+
+export function restoreScrollPosition() {
+    const c = document.getElementById('scp-messages');
+    if (!c) return;
+    
+    const tryRestore = (attempts = 0) => {
+        if (c.offsetHeight > 0) {
+            if (state.userScrolledUp && state.savedScrollTop !== undefined) {
+                c.scrollTop = state.savedScrollTop;
+            } else {
+                c.scrollTop = c.scrollHeight;
+            }
+        } else if (attempts < 5) {
+            setTimeout(() => tryRestore(attempts + 1), 50);
+        }
+    };
+    tryRestore();
 }
 
 export function smartScrollToBottom() {
@@ -916,7 +951,7 @@ export function setupMessagesScrollTracking() {
 
 // ─── Message List and Handlers ──────────────────────────────────────────
 
-export function addHistoryToSwipe(msgId, newLines) {
+export function addHistoryToSwipe(msgId, newLines, charName = null) {
     if (!msgId) return false;
     const session = getCurrentSession();
     const msg = session.messages.find(m => m.id === msgId);
@@ -925,6 +960,7 @@ export function addHistoryToSwipe(msgId, newLines) {
     const currentSwipe = msg.swipes[msg.swipeIndex || 0];
     if (!currentSwipe.historyLines) currentSwipe.historyLines = [];
     currentSwipe.historyLines.push(...newLines);
+    if (charName && !currentSwipe._charName) currentSwipe._charName = charName;
     saveSessionsToMetadata();
     
     const msgEl = document.querySelector(`.scp-msg[data-id="${msgId}"]`);
@@ -1019,7 +1055,7 @@ export function handleEdit(wrapEl, msg) {
         if (charChanges?.length) { 
             stripped = stripCharChangesBlock(stripped); 
             renderCharProposalCard(charChanges, wrapEl); 
-        } else document.querySelector(`.scp-char-proposal-card[data-for="${msg.id}"]`)?.remove();
+        } else document.querySelectorAll(`.scp-char-proposal-card[data-for="${msg.id}"]`).forEach(c => c.remove());
         
         if (charCreation) { 
             stripped = stripCharCreationBlock(stripped); 
@@ -1188,9 +1224,9 @@ export function renderSession(session) {
         }
     }
     updateMsgCount(session);
-    scrollToBottom();
     _refreshContinueBtns();
     _refreshSwipeBars(session);
+    requestAnimationFrame(() => scrollToBottom());
 }
 
 export function appendMsgEl(msg, isStreamInit = false) {
@@ -1204,9 +1240,9 @@ export function appendMsgEl(msg, isStreamInit = false) {
     if (!isStreamInit) {
         const session = getCurrentSession();
         updateMsgCount(session);
-        scrollToBottom();
         _refreshContinueBtns();
         _refreshSwipeBars(session);
+        requestAnimationFrame(() => scrollToBottom());
 
         if (state.searchOpen && state.searchQuery.trim()) {
             const newMarks = _applyHighlightsInRoot(el);
@@ -1222,7 +1258,7 @@ export function removeMsgEl(msgId) {
     const el = document.querySelector(`.scp-msg[data-id="${msgId}"]`);
     if (!el) return;
     document.querySelector(`.scp-lb-proposal-card[data-for="${msgId}"]`)?.remove();
-    document.querySelector(`.scp-char-proposal-card[data-for="${msgId}"]`)?.remove();
+    document.querySelectorAll(`.scp-char-proposal-card[data-for="${msgId}"]`).forEach(c => c.remove());
     document.querySelector(`.scp-char-creation-card[data-for="${msgId}"]`)?.remove();
     document.querySelector(`.scp-chat-proposal-card[data-for="${msgId}"]`)?.remove();
     el.remove();
@@ -1237,7 +1273,7 @@ export function removeMsgElAndBelow(msgId) {
         if (el.dataset.id === msgId) found = true;
         if (found) {
             document.querySelector(`.scp-lb-proposal-card[data-for="${el.dataset.id}"]`)?.remove();
-            document.querySelector(`.scp-char-proposal-card[data-for="${el.dataset.id}"]`)?.remove();
+            document.querySelectorAll(`.scp-char-proposal-card[data-for="${el.dataset.id}"]`).forEach(c => c.remove());
             document.querySelector(`.scp-char-creation-card[data-for="${el.dataset.id}"]`)?.remove();
             document.querySelector(`.scp-chat-proposal-card[data-for="${el.dataset.id}"]`)?.remove();
             el.remove();
@@ -1257,7 +1293,7 @@ export function removeMsgElAfter(msgId) {
     for (const el of [...c.querySelectorAll('.scp-msg')]) {
         if (found) {
             document.querySelector(`.scp-lb-proposal-card[data-for="${el.dataset.id}"]`)?.remove();
-            document.querySelector(`.scp-char-proposal-card[data-for="${el.dataset.id}"]`)?.remove();
+            document.querySelectorAll(`.scp-char-proposal-card[data-for="${el.dataset.id}"]`).forEach(card => card.remove());
             document.querySelector(`.scp-char-creation-card[data-for="${el.dataset.id}"]`)?.remove();
             document.querySelector(`.scp-chat-proposal-card[data-for="${el.dataset.id}"]`)?.remove();
             el.remove();
