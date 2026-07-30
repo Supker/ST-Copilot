@@ -30,6 +30,50 @@ import('./ui-settings.js').then(m => uiSetMod = m);
 let featCharUiMod = null;
 import('../features/feature-character-ui.js').then(m => featCharUiMod = m);
 
+// ─── Streaming Render Scheduler ──────────────────────────────────────────────
+// Streaming callbacks fire once per SSE chunk. Re-rendering the whole
+// accumulated response on each one is O(n^2) work and forces a synchronous
+// reflow per token. Chunks are coalesced into at most one render per frame.
+// As a side effect rendering pauses entirely while the tab is hidden, since
+// requestAnimationFrame does not fire there.
+
+let _streamRafId = null;
+let _streamJob = null;
+
+const _runStreamJob = () => {
+    _streamRafId = null;
+    const job = _streamJob;
+    _streamJob = null;
+    if (job) job();
+};
+
+/** Queue a render, replacing any render still waiting for the next frame. */
+export function scheduleStreamRender(job) {
+    _streamJob = job;
+    if (_streamRafId === null) _streamRafId = requestAnimationFrame(_runStreamJob);
+}
+
+/** Run any queued render immediately. */
+export function flushStreamRender() {
+    if (_streamRafId !== null) {
+        cancelAnimationFrame(_streamRafId);
+        _streamRafId = null;
+    }
+    _runStreamJob();
+}
+
+/**
+ * Drop any queued render without running it. Call before an authoritative
+ * re-render so a late frame cannot clobber final content with stale text.
+ */
+export function cancelStreamRender() {
+    if (_streamRafId !== null) {
+        cancelAnimationFrame(_streamRafId);
+        _streamRafId = null;
+    }
+    _streamJob = null;
+}
+
 // ─── Text Render and Markdown ────────────────────────────────────────────────
 
 export function renderMarkdown(text) {
@@ -309,11 +353,54 @@ export function createHTMLBlockEl(code) {
     return wrap;
 }
 
-export function postProcessHTMLBlocks(el) {
+/**
+ * Inert stand-in used while a response is still streaming. Booting a sandboxed
+ * iframe per chunk is expensive and the observers inside it outlive the element,
+ * so the block stays plain code until the stream finishes.
+ */
+export function createStreamingHTMLBlockEl(code) {
+    const wrap = document.createElement('div');
+    wrap.className = 'scp-html-block';
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'scp-html-block-toolbar';
+    const label = document.createElement('span');
+    label.className = 'scp-html-block-label';
+    label.textContent = 'HTML';
+    toolbar.append(label);
+
+    const codePre = document.createElement('pre');
+    codePre.className = 'scp-code-block scp-html-block-code';
+    codePre.textContent = code;
+
+    wrap.append(toolbar, codePre);
+    return wrap;
+}
+
+// Safety net for any renderMarkdown() output that never reaches
+// postProcessHTMLBlocks() and so never has its registry entry consumed.
+const HTML_BLOCK_REGISTRY_MAX = 200;
+
+function pruneHTMLBlockRegistry() {
+    let excess = state.htmlBlockRegistry.size - HTML_BLOCK_REGISTRY_MAX;
+    if (excess <= 0) return;
+    for (const key of state.htmlBlockRegistry.keys()) {
+        if (excess-- <= 0) break;
+        state.htmlBlockRegistry.delete(key);
+    }
+}
+
+export function postProcessHTMLBlocks(el, deferIframes = false) {
     el.querySelectorAll('.scp-html-block-ph').forEach(ph => {
-        const code = state.htmlBlockRegistry.get(ph.dataset.hbid);
-        if (code !== undefined) ph.replaceWith(createHTMLBlockEl(code));
+        const id = ph.dataset.hbid;
+        const code = state.htmlBlockRegistry.get(id);
+        if (code === undefined) return;
+        // Each entry is written by renderMarkdown() and read exactly once here;
+        // dropping it on consumption keeps the registry from growing per chunk.
+        state.htmlBlockRegistry.delete(id);
+        ph.replaceWith(deferIframes ? createStreamingHTMLBlockEl(code) : createHTMLBlockEl(code));
     });
+    pruneHTMLBlockRegistry();
 }
 
 export function getDisplayContent(rawText, settings) {
@@ -780,33 +867,35 @@ export async function _runSwipeRegen(session, msgId, wrapEl) {
             const bar = document.getElementById('scp-thinking-bar');
             if (bar) bar.style.display = 'flex';
         }
-        if (streamContentEl) {
-            let procReasoning = reasoning || '';
-            let procText = stripMemoryBlock(text);
-            let tcIndex = 0;
-            
-            if (procReasoning) {
-                const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
-                procReasoning = resR.text;
-                tcIndex = resR.nextIndex;
-            }
-            const resC = extractToolCallPlaceholders(procText, tcIndex);
-            procText = resC.text;
+        scheduleStreamRender(() => {
+            if (streamContentEl) {
+                let procReasoning = reasoning || '';
+                let procText = stripMemoryBlock(text);
+                let tcIndex = 0;
 
-            const { content: disp } = getDisplayContent(procText, settings);
-            streamContentEl.innerHTML = renderMarkdown(disp);
-            if (procText) streamContentEl.appendChild(cursorEl);
-            postProcessHTMLBlocks(streamContentEl);
+                if (procReasoning) {
+                    const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
+                    procReasoning = resR.text;
+                    tcIndex = resR.nextIndex;
+                }
+                const resC = extractToolCallPlaceholders(procText, tcIndex);
+                procText = resC.text;
 
-            if (tcIndex > 0) {
-                const liveTCs = parseToolCallsFromText((reasoning || '') + '\n' + text);
-                const displayed = liveTCs.map((tc, i) => ({
-                    id: `live_${i}`, name: tc.name, input: tc.input, status: 'done', result: undefined
-                }));
-                postProcessToolCalls(wrapEl, displayed);
+                const { content: disp } = getDisplayContent(procText, settings);
+                streamContentEl.innerHTML = renderMarkdown(disp);
+                if (procText) streamContentEl.appendChild(cursorEl);
+                postProcessHTMLBlocks(streamContentEl, true);
+
+                if (tcIndex > 0) {
+                    const liveTCs = parseToolCallsFromText((reasoning || '') + '\n' + text);
+                    const displayed = liveTCs.map((tc, i) => ({
+                        id: `live_${i}`, name: tc.name, input: tc.input, status: 'done', result: undefined
+                    }));
+                    postProcessToolCalls(wrapEl, displayed);
+                }
             }
-        }
-        smartScrollToBottom();
+            smartScrollToBottom();
+        });
     };
 
     try {
@@ -818,6 +907,7 @@ export async function _runSwipeRegen(session, msgId, wrapEl) {
         const tokensIn = await apiMod.estimateTokens(fullPromptText);
 
         const result = await apiMod.callGenerate(tempSession, settings, null, onChunk);
+        cancelStreamRender();
         cleanupCursor();
 
         if (result === null) {
@@ -850,6 +940,7 @@ export async function _runSwipeRegen(session, msgId, wrapEl) {
         if (uiWdgMod) uiWdgMod.playCompletionSound();
 
     } catch(err) {
+        cancelStreamRender();
         cleanupCursor();
         msgData.swipes.pop();
         msgData.swipeIndex = msgData.swipes.length - 1;
