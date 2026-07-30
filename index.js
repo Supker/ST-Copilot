@@ -10514,6 +10514,50 @@ ${tc.result !== undefined ? `<div class="scp-tool-call-section-label" style="mar
   let featCharUiMod = null;
   Promise.resolve().then(function () { return featureCharacterUi; }).then(m => featCharUiMod = m);
 
+  // ─── Streaming Render Scheduler ──────────────────────────────────────────────
+  // Streaming callbacks fire once per SSE chunk. Re-rendering the whole
+  // accumulated response on each one is O(n^2) work and forces a synchronous
+  // reflow per token. Chunks are coalesced into at most one render per frame.
+  // As a side effect rendering pauses entirely while the tab is hidden, since
+  // requestAnimationFrame does not fire there.
+
+  let _streamRafId = null;
+  let _streamJob = null;
+
+  const _runStreamJob = () => {
+      _streamRafId = null;
+      const job = _streamJob;
+      _streamJob = null;
+      if (job) job();
+  };
+
+  /** Queue a render, replacing any render still waiting for the next frame. */
+  function scheduleStreamRender(job) {
+      _streamJob = job;
+      if (_streamRafId === null) _streamRafId = requestAnimationFrame(_runStreamJob);
+  }
+
+  /** Run any queued render immediately. */
+  function flushStreamRender() {
+      if (_streamRafId !== null) {
+          cancelAnimationFrame(_streamRafId);
+          _streamRafId = null;
+      }
+      _runStreamJob();
+  }
+
+  /**
+   * Drop any queued render without running it. Call before an authoritative
+   * re-render so a late frame cannot clobber final content with stale text.
+   */
+  function cancelStreamRender() {
+      if (_streamRafId !== null) {
+          cancelAnimationFrame(_streamRafId);
+          _streamRafId = null;
+      }
+      _streamJob = null;
+  }
+
   // ─── Text Render and Markdown ────────────────────────────────────────────────
 
   function renderMarkdown(text) {
@@ -10793,11 +10837,54 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
       return wrap;
   }
 
-  function postProcessHTMLBlocks(el) {
+  /**
+   * Inert stand-in used while a response is still streaming. Booting a sandboxed
+   * iframe per chunk is expensive and the observers inside it outlive the element,
+   * so the block stays plain code until the stream finishes.
+   */
+  function createStreamingHTMLBlockEl(code) {
+      const wrap = document.createElement('div');
+      wrap.className = 'scp-html-block';
+
+      const toolbar = document.createElement('div');
+      toolbar.className = 'scp-html-block-toolbar';
+      const label = document.createElement('span');
+      label.className = 'scp-html-block-label';
+      label.textContent = 'HTML';
+      toolbar.append(label);
+
+      const codePre = document.createElement('pre');
+      codePre.className = 'scp-code-block scp-html-block-code';
+      codePre.textContent = code;
+
+      wrap.append(toolbar, codePre);
+      return wrap;
+  }
+
+  // Safety net for any renderMarkdown() output that never reaches
+  // postProcessHTMLBlocks() and so never has its registry entry consumed.
+  const HTML_BLOCK_REGISTRY_MAX = 200;
+
+  function pruneHTMLBlockRegistry() {
+      let excess = state.htmlBlockRegistry.size - HTML_BLOCK_REGISTRY_MAX;
+      if (excess <= 0) return;
+      for (const key of state.htmlBlockRegistry.keys()) {
+          if (excess-- <= 0) break;
+          state.htmlBlockRegistry.delete(key);
+      }
+  }
+
+  function postProcessHTMLBlocks(el, deferIframes = false) {
       el.querySelectorAll('.scp-html-block-ph').forEach(ph => {
-          const code = state.htmlBlockRegistry.get(ph.dataset.hbid);
-          if (code !== undefined) ph.replaceWith(createHTMLBlockEl(code));
+          const id = ph.dataset.hbid;
+          const code = state.htmlBlockRegistry.get(id);
+          if (code === undefined) return;
+          // Each entry is written by renderMarkdown() and read exactly once here;
+          // dropping it on consumption keeps the registry from growing per chunk.
+          state.htmlBlockRegistry.delete(id);
+          ph.replaceWith(deferIframes ? createStreamingHTMLBlockEl(code) : createHTMLBlockEl(code));
       });
+      pruneHTMLBlockRegistry();
   }
 
   function getDisplayContent(rawText, settings) {
@@ -11264,33 +11351,35 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
               const bar = document.getElementById('scp-thinking-bar');
               if (bar) bar.style.display = 'flex';
           }
-          if (streamContentEl) {
-              let procReasoning = reasoning || '';
-              let procText = stripMemoryBlock(text);
-              let tcIndex = 0;
-              
-              if (procReasoning) {
-                  const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
-                  procReasoning = resR.text;
-                  tcIndex = resR.nextIndex;
-              }
-              const resC = extractToolCallPlaceholders(procText, tcIndex);
-              procText = resC.text;
+          scheduleStreamRender(() => {
+              if (streamContentEl) {
+                  let procReasoning = reasoning || '';
+                  let procText = stripMemoryBlock(text);
+                  let tcIndex = 0;
 
-              const { content: disp } = getDisplayContent(procText, settings);
-              streamContentEl.innerHTML = renderMarkdown(disp);
-              if (procText) streamContentEl.appendChild(cursorEl);
-              postProcessHTMLBlocks(streamContentEl);
+                  if (procReasoning) {
+                      const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
+                      procReasoning = resR.text;
+                      tcIndex = resR.nextIndex;
+                  }
+                  const resC = extractToolCallPlaceholders(procText, tcIndex);
+                  procText = resC.text;
 
-              if (tcIndex > 0) {
-                  const liveTCs = parseToolCallsFromText((reasoning || '') + '\n' + text);
-                  const displayed = liveTCs.map((tc, i) => ({
-                      id: `live_${i}`, name: tc.name, input: tc.input, status: 'done', result: undefined
-                  }));
-                  postProcessToolCalls(wrapEl, displayed);
+                  const { content: disp } = getDisplayContent(procText, settings);
+                  streamContentEl.innerHTML = renderMarkdown(disp);
+                  if (procText) streamContentEl.appendChild(cursorEl);
+                  postProcessHTMLBlocks(streamContentEl, true);
+
+                  if (tcIndex > 0) {
+                      const liveTCs = parseToolCallsFromText((reasoning || '') + '\n' + text);
+                      const displayed = liveTCs.map((tc, i) => ({
+                          id: `live_${i}`, name: tc.name, input: tc.input, status: 'done', result: undefined
+                      }));
+                      postProcessToolCalls(wrapEl, displayed);
+                  }
               }
-          }
-          smartScrollToBottom();
+              smartScrollToBottom();
+          });
       };
 
       try {
@@ -11302,6 +11391,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
           const tokensIn = await apiMod.estimateTokens(fullPromptText);
 
           const result = await apiMod.callGenerate(tempSession, settings, null, onChunk);
+          cancelStreamRender();
           cleanupCursor();
 
           if (result === null) {
@@ -11334,6 +11424,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
           if (uiWdgMod) uiWdgMod.playCompletionSound();
 
       } catch(err) {
+          cancelStreamRender();
           cleanupCursor();
           msgData.swipes.pop();
           msgData.swipeIndex = msgData.swipes.length - 1;
@@ -12507,12 +12598,15 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
     addHistoryToSwipe: addHistoryToSwipe,
     addSwipe: addSwipe,
     appendMsgEl: appendMsgEl,
+    cancelStreamRender: cancelStreamRender,
     clearSearchHighlights: clearSearchHighlights,
     closeChatPicker: closeChatPicker,
     closeSearch: closeSearch,
     createHTMLBlockEl: createHTMLBlockEl,
     createMsgEl: createMsgEl,
+    createStreamingHTMLBlockEl: createStreamingHTMLBlockEl,
     extractToolCallPlaceholders: extractToolCallPlaceholders,
+    flushStreamRender: flushStreamRender,
     getDisplayContent: getDisplayContent,
     getLastAssistantMsgId: getLastAssistantMsgId,
     getPickedChatIndices: getPickedChatIndices,
@@ -12537,6 +12631,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
     renderSession: renderSession,
     restoreScrollPosition: restoreScrollPosition,
     saveScrollPosition: saveScrollPosition,
+    scheduleStreamRender: scheduleStreamRender,
     scrollToBottom: scrollToBottom,
     setGeneratingState: setGeneratingState,
     setPickedChatIndices: setPickedChatIndices,
@@ -14692,42 +14787,44 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
               }
           }
 
-          if (streamContentEl) {
-              let procReasoning = reasoning || '';
-              let procText = stripMemoryBlock(text);
-              
-              let tcIndex = 0;
-              if (procReasoning) {
-                  const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
-                  procReasoning = resR.text;
-                  tcIndex = resR.nextIndex;
-              }
-              const resC = extractToolCallPlaceholders(procText, tcIndex);
-              procText = resC.text;
+          scheduleStreamRender(() => {
+              if (streamContentEl) {
+                  let procReasoning = reasoning || '';
+                  let procText = stripMemoryBlock(text);
 
-              if (reasoning && streamReasoningBlockEl) {
-                  streamReasoningBlockEl.style.display = '';
-                  streamReasoningContentEl.innerHTML = renderMarkdown(procReasoning);
-                  postProcessHTMLBlocks(streamReasoningContentEl);
-                  const secs = reasoningMs ? (reasoningMs / 1000).toFixed(1) : null;
-                  streamReasoningSummaryEl.textContent = reasoningDone
-                      ? `Thought for ${secs}s`
-                      : secs ? `Thinking for ${secs}s…` : 'Thinking…';
-              }
+                  let tcIndex = 0;
+                  if (procReasoning) {
+                      const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
+                      procReasoning = resR.text;
+                      tcIndex = resR.nextIndex;
+                  }
+                  const resC = extractToolCallPlaceholders(procText, tcIndex);
+                  procText = resC.text;
 
-              streamContentEl.innerHTML = renderMarkdown(procText);
-              if (procText) streamContentEl.appendChild(cursorEl);
-              postProcessHTMLBlocks(streamContentEl);
+                  if (reasoning && streamReasoningBlockEl) {
+                      streamReasoningBlockEl.style.display = '';
+                      streamReasoningContentEl.innerHTML = renderMarkdown(procReasoning);
+                      postProcessHTMLBlocks(streamReasoningContentEl, true);
+                      const secs = reasoningMs ? (reasoningMs / 1000).toFixed(1) : null;
+                      streamReasoningSummaryEl.textContent = reasoningDone
+                          ? `Thought for ${secs}s`
+                          : secs ? `Thinking for ${secs}s…` : 'Thinking…';
+                  }
 
-              if (state.activeToolCalls.length || tcIndex > 0) {
-                  const liveTCs = parseToolCallsFromText((reasoning || '') + '\n' + text);
-                  const displayed = liveTCs.map((tc, i) => state.activeToolCalls[i] || {
-                      id: `live_${i}`, name: tc.name, input: tc.input, status: 'running', result: undefined
-                  });
-                  postProcessToolCalls(streamMsgEl, displayed);
+                  streamContentEl.innerHTML = renderMarkdown(procText);
+                  if (procText) streamContentEl.appendChild(cursorEl);
+                  postProcessHTMLBlocks(streamContentEl, true);
+
+                  if (state.activeToolCalls.length || tcIndex > 0) {
+                      const liveTCs = parseToolCallsFromText((reasoning || '') + '\n' + text);
+                      const displayed = liveTCs.map((tc, i) => state.activeToolCalls[i] || {
+                          id: `live_${i}`, name: tc.name, input: tc.input, status: 'running', result: undefined
+                      });
+                      postProcessToolCalls(streamMsgEl, displayed);
+                  }
               }
-          }
-          smartScrollToBottom();
+              smartScrollToBottom();
+          });
       };
 
       try {
@@ -14754,8 +14851,9 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
 
           let result = await callGenerate(session, settings, null, onChunk);
 
+          cancelStreamRender();
           cleanupCursor();
-          
+
           if (result && !result.text.trim() && !result.reasoning?.trim()) {
               toastr.warning('⚠ Generation failed: AI returned an empty response.', EXT_DISPLAY, { timeOut: 10000 });
           }
@@ -14769,7 +14867,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
               let accumulatedText = roundText;
               let accumulatedReasoning = roundReasoning || null;
 
-              const _updateLiveUI = (tempText = '', tempReasoning = null) => {
+              const _updateLiveUI = (tempText = '', tempReasoning = null, appendEl = null) => {
                   if (!streamMsgEl || !streamContentEl) return;
                   let combinedText = tempText ? accumulatedText + '\n\n' + tempText : accumulatedText;
                   let combinedReasoning = accumulatedReasoning || '';
@@ -14777,30 +14875,33 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                       combinedReasoning = combinedReasoning ? combinedReasoning + '\n\n' + tempReasoning : tempReasoning;
                   }
                   
-                  let procReasoning = combinedReasoning;
-                  let procText = stripMemoryBlock(combinedText);
-                  let tcIndex = 0;
-                  
-                  if (procReasoning) {
-                      const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
-                      procReasoning = resR.text;
-                      tcIndex = resR.nextIndex;
-                  }
-                  const resC = extractToolCallPlaceholders(procText, tcIndex);
-                  procText = resC.text;
+                  scheduleStreamRender(() => {
+                      let procReasoning = combinedReasoning;
+                      let procText = stripMemoryBlock(combinedText);
+                      let tcIndex = 0;
 
-                  if (combinedReasoning && streamReasoningBlockEl) {
-                      streamReasoningBlockEl.style.display = '';
-                      streamReasoningContentEl.innerHTML = renderMarkdown(procReasoning);
-                      postProcessHTMLBlocks(streamReasoningContentEl);
-                  }
-                  streamContentEl.innerHTML = renderMarkdown(procText);
-                  postProcessHTMLBlocks(streamContentEl);
+                      if (procReasoning) {
+                          const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
+                          procReasoning = resR.text;
+                          tcIndex = resR.nextIndex;
+                      }
+                      const resC = extractToolCallPlaceholders(procText, tcIndex);
+                      procText = resC.text;
 
-                  if (state.activeToolCalls.length || tcIndex > 0) {
-                      postProcessToolCalls(streamMsgEl, state.activeToolCalls);
-                  }
-                  smartScrollToBottom();
+                      if (combinedReasoning && streamReasoningBlockEl) {
+                          streamReasoningBlockEl.style.display = '';
+                          streamReasoningContentEl.innerHTML = renderMarkdown(procReasoning);
+                          postProcessHTMLBlocks(streamReasoningContentEl, true);
+                      }
+                      streamContentEl.innerHTML = renderMarkdown(procText);
+                      if (appendEl) streamContentEl.appendChild(appendEl);
+                      postProcessHTMLBlocks(streamContentEl, true);
+
+                      if (state.activeToolCalls.length || tcIndex > 0) {
+                          postProcessToolCalls(streamMsgEl, state.activeToolCalls);
+                      }
+                      smartScrollToBottom();
+                  });
               };
 
               for (let round = 0; round < maxRounds; round++) {
@@ -14866,10 +14967,10 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                   };
 
                   const nextResult = await callGenerate(tempSession, settings, null, (t, r) => {
-                      _updateLiveUI(t, r);
-                      if (streamContentEl) streamContentEl.appendChild(cursor2);
+                      _updateLiveUI(t, r, cursor2);
                   });
 
+                  cancelStreamRender();
                   session.messages = session.messages.filter(m => !m._tcTemp);
                   cursor2.remove();
 
@@ -14886,6 +14987,10 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
                   result = { text: accumulatedText, reasoning: accumulatedReasoning };
               }
           }
+
+          // No queued frame may survive into finalization; everything below
+          // re-renders the message from its authoritative content.
+          cancelStreamRender();
 
           if (result === null) {
               if (streamMsgId && isStreaming && streamAccumText) {
@@ -14945,6 +15050,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
           _dbgAdd('GEN_DONE', { chars: fullText?.length || 0, hasReasoning: !!fullReasoning, tokensOut });
 
       } catch (err) {
+          cancelStreamRender();
           cleanupCursor();
           if (state.abortController?.signal?.aborted || err?.message === 'userStopped') {
               state.generating = false;
@@ -15011,26 +15117,28 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
               const bar = document.getElementById('scp-thinking-bar');
               if (bar) bar.style.display = 'flex';
           }
-          const combined = _joinContinuation(originalContent, text);
-          let tcIndex = 0;
-          const resC = extractToolCallPlaceholders(combined, tcIndex);
-          let procText = resC.text;
+          scheduleStreamRender(() => {
+              const combined = _joinContinuation(originalContent, text);
+              let tcIndex = 0;
+              const resC = extractToolCallPlaceholders(combined, tcIndex);
+              let procText = resC.text;
 
-          const { content: disp } = getDisplayContent(procText, settings);
-          if (streamContentEl) {
-              streamContentEl.innerHTML = renderMarkdown(disp);
-              streamContentEl.appendChild(cursorEl);
-              postProcessHTMLBlocks(streamContentEl);
+              const { content: disp } = getDisplayContent(procText, settings);
+              if (streamContentEl) {
+                  streamContentEl.innerHTML = renderMarkdown(disp);
+                  streamContentEl.appendChild(cursorEl);
+                  postProcessHTMLBlocks(streamContentEl, true);
 
-              if (resC.nextIndex > 0) {
-                  const liveTCs = parseToolCallsFromText(combined);
-                  const displayed = liveTCs.map((tc, i) => targetMsg.toolCalls?.[i] || {
-                      id: `live_${i}`, name: tc.name, input: tc.input, status: 'done', result: undefined
-                  });
-                  postProcessToolCalls(targetEl, displayed);
+                  if (resC.nextIndex > 0) {
+                      const liveTCs = parseToolCallsFromText(combined);
+                      const displayed = liveTCs.map((tc, i) => targetMsg.toolCalls?.[i] || {
+                          id: `live_${i}`, name: tc.name, input: tc.input, status: 'done', result: undefined
+                      });
+                      postProcessToolCalls(targetEl, displayed);
+                  }
               }
-          }
-          smartScrollToBottom();
+              smartScrollToBottom();
+          });
       };
 
       const _applyFinalContinuation = (fullCombined) => {
@@ -15054,6 +15162,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
           });
 
           const result = await callGenerate(session, settings, CONTINUE_PROMPT, onChunk);
+          cancelStreamRender();
           cleanupCursor();
 
           if (result === null) {
@@ -15096,6 +15205,7 @@ window.onerror=function(m){window.parent.postMessage({type:'scp-iframe-err',msg:
           _dbgAdd('CONTINUE_DONE', { chars: continuation?.length || 0, tokensOut });
 
       } catch (err) {
+          cancelStreamRender();
           cleanupCursor();
           if (state.abortController?.signal?.aborted || err?.message === 'userStopped') {
               state.generating = false;

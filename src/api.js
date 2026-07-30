@@ -19,7 +19,7 @@ import { buildMemoryContextBlock, buildMemoryAIInstructions, processMemoryUpdate
 import { buildToolCallsSystemBlock, parseToolCallsFromText, executeTool, getEnabledTools } from './features/feature-tools-engine.js';
 
 import { updateMsgCount, smartScrollToBottom, setGeneratingState, showGenerationError, _renderMsgBodyContent, updateSwipeBar, _refreshSwipeBars, appendMsgEl } from './ui/ui-chat.js';
-import { getDisplayContent, extractToolCallPlaceholders, renderMarkdown, postProcessHTMLBlocks } from './ui/ui-chat.js'; 
+import { getDisplayContent, extractToolCallPlaceholders, renderMarkdown, postProcessHTMLBlocks, scheduleStreamRender, cancelStreamRender } from './ui/ui-chat.js';
 import { postProcessToolCalls, executeAskUser } from './features/feature-tools-ui.js';
 import { playCompletionSound } from './ui/ui-widgets.js';
 
@@ -799,42 +799,44 @@ export async function runGenerate(session, userText, addUserMsg = true, processe
             }
         }
 
-        if (streamContentEl) {
-            let procReasoning = reasoning || '';
-            let procText = stripMemoryBlock(text);
-            
-            let tcIndex = 0;
-            if (procReasoning) {
-                const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
-                procReasoning = resR.text;
-                tcIndex = resR.nextIndex;
-            }
-            const resC = extractToolCallPlaceholders(procText, tcIndex);
-            procText = resC.text;
+        scheduleStreamRender(() => {
+            if (streamContentEl) {
+                let procReasoning = reasoning || '';
+                let procText = stripMemoryBlock(text);
 
-            if (reasoning && streamReasoningBlockEl) {
-                streamReasoningBlockEl.style.display = '';
-                streamReasoningContentEl.innerHTML = renderMarkdown(procReasoning);
-                postProcessHTMLBlocks(streamReasoningContentEl);
-                const secs = reasoningMs ? (reasoningMs / 1000).toFixed(1) : null;
-                streamReasoningSummaryEl.textContent = reasoningDone
-                    ? `Thought for ${secs}s`
-                    : secs ? `Thinking for ${secs}s…` : 'Thinking…';
-            }
+                let tcIndex = 0;
+                if (procReasoning) {
+                    const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
+                    procReasoning = resR.text;
+                    tcIndex = resR.nextIndex;
+                }
+                const resC = extractToolCallPlaceholders(procText, tcIndex);
+                procText = resC.text;
 
-            streamContentEl.innerHTML = renderMarkdown(procText);
-            if (procText) streamContentEl.appendChild(cursorEl);
-            postProcessHTMLBlocks(streamContentEl);
+                if (reasoning && streamReasoningBlockEl) {
+                    streamReasoningBlockEl.style.display = '';
+                    streamReasoningContentEl.innerHTML = renderMarkdown(procReasoning);
+                    postProcessHTMLBlocks(streamReasoningContentEl, true);
+                    const secs = reasoningMs ? (reasoningMs / 1000).toFixed(1) : null;
+                    streamReasoningSummaryEl.textContent = reasoningDone
+                        ? `Thought for ${secs}s`
+                        : secs ? `Thinking for ${secs}s…` : 'Thinking…';
+                }
 
-            if (state.activeToolCalls.length || tcIndex > 0) {
-                const liveTCs = parseToolCallsFromText((reasoning || '') + '\n' + text);
-                const displayed = liveTCs.map((tc, i) => state.activeToolCalls[i] || {
-                    id: `live_${i}`, name: tc.name, input: tc.input, status: 'running', result: undefined
-                });
-                postProcessToolCalls(streamMsgEl, displayed);
+                streamContentEl.innerHTML = renderMarkdown(procText);
+                if (procText) streamContentEl.appendChild(cursorEl);
+                postProcessHTMLBlocks(streamContentEl, true);
+
+                if (state.activeToolCalls.length || tcIndex > 0) {
+                    const liveTCs = parseToolCallsFromText((reasoning || '') + '\n' + text);
+                    const displayed = liveTCs.map((tc, i) => state.activeToolCalls[i] || {
+                        id: `live_${i}`, name: tc.name, input: tc.input, status: 'running', result: undefined
+                    });
+                    postProcessToolCalls(streamMsgEl, displayed);
+                }
             }
-        }
-        smartScrollToBottom();
+            smartScrollToBottom();
+        });
     };
 
     try {
@@ -861,8 +863,9 @@ export async function runGenerate(session, userText, addUserMsg = true, processe
 
         let result = await callGenerate(session, settings, null, onChunk);
 
+        cancelStreamRender();
         cleanupCursor();
-        
+
         if (result && !result.text.trim() && !result.reasoning?.trim()) {
             toastr.warning('⚠ Generation failed: AI returned an empty response.', EXT_DISPLAY, { timeOut: 10000 });
         }
@@ -876,7 +879,7 @@ export async function runGenerate(session, userText, addUserMsg = true, processe
             let accumulatedText = roundText;
             let accumulatedReasoning = roundReasoning || null;
 
-            const _updateLiveUI = (tempText = '', tempReasoning = null) => {
+            const _updateLiveUI = (tempText = '', tempReasoning = null, appendEl = null) => {
                 if (!streamMsgEl || !streamContentEl) return;
                 let combinedText = tempText ? accumulatedText + '\n\n' + tempText : accumulatedText;
                 let combinedReasoning = accumulatedReasoning || '';
@@ -884,30 +887,33 @@ export async function runGenerate(session, userText, addUserMsg = true, processe
                     combinedReasoning = combinedReasoning ? combinedReasoning + '\n\n' + tempReasoning : tempReasoning;
                 }
                 
-                let procReasoning = combinedReasoning;
-                let procText = stripMemoryBlock(combinedText);
-                let tcIndex = 0;
-                
-                if (procReasoning) {
-                    const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
-                    procReasoning = resR.text;
-                    tcIndex = resR.nextIndex;
-                }
-                const resC = extractToolCallPlaceholders(procText, tcIndex);
-                procText = resC.text;
+                scheduleStreamRender(() => {
+                    let procReasoning = combinedReasoning;
+                    let procText = stripMemoryBlock(combinedText);
+                    let tcIndex = 0;
 
-                if (combinedReasoning && streamReasoningBlockEl) {
-                    streamReasoningBlockEl.style.display = '';
-                    streamReasoningContentEl.innerHTML = renderMarkdown(procReasoning);
-                    postProcessHTMLBlocks(streamReasoningContentEl);
-                }
-                streamContentEl.innerHTML = renderMarkdown(procText);
-                postProcessHTMLBlocks(streamContentEl);
+                    if (procReasoning) {
+                        const resR = extractToolCallPlaceholders(procReasoning, tcIndex);
+                        procReasoning = resR.text;
+                        tcIndex = resR.nextIndex;
+                    }
+                    const resC = extractToolCallPlaceholders(procText, tcIndex);
+                    procText = resC.text;
 
-                if (state.activeToolCalls.length || tcIndex > 0) {
-                    postProcessToolCalls(streamMsgEl, state.activeToolCalls);
-                }
-                smartScrollToBottom();
+                    if (combinedReasoning && streamReasoningBlockEl) {
+                        streamReasoningBlockEl.style.display = '';
+                        streamReasoningContentEl.innerHTML = renderMarkdown(procReasoning);
+                        postProcessHTMLBlocks(streamReasoningContentEl, true);
+                    }
+                    streamContentEl.innerHTML = renderMarkdown(procText);
+                    if (appendEl) streamContentEl.appendChild(appendEl);
+                    postProcessHTMLBlocks(streamContentEl, true);
+
+                    if (state.activeToolCalls.length || tcIndex > 0) {
+                        postProcessToolCalls(streamMsgEl, state.activeToolCalls);
+                    }
+                    smartScrollToBottom();
+                });
             };
 
             for (let round = 0; round < maxRounds; round++) {
@@ -973,10 +979,10 @@ export async function runGenerate(session, userText, addUserMsg = true, processe
                 };
 
                 const nextResult = await callGenerate(tempSession, settings, null, (t, r) => {
-                    _updateLiveUI(t, r);
-                    if (streamContentEl) streamContentEl.appendChild(cursor2);
+                    _updateLiveUI(t, r, cursor2);
                 });
 
+                cancelStreamRender();
                 session.messages = session.messages.filter(m => !m._tcTemp);
                 cursor2.remove();
 
@@ -993,6 +999,10 @@ export async function runGenerate(session, userText, addUserMsg = true, processe
                 result = { text: accumulatedText, reasoning: accumulatedReasoning };
             }
         }
+
+        // No queued frame may survive into finalization; everything below
+        // re-renders the message from its authoritative content.
+        cancelStreamRender();
 
         if (result === null) {
             if (streamMsgId && isStreaming && streamAccumText) {
@@ -1052,6 +1062,7 @@ export async function runGenerate(session, userText, addUserMsg = true, processe
         _dbgAdd('GEN_DONE', { chars: fullText?.length || 0, hasReasoning: !!fullReasoning, tokensOut });
 
     } catch (err) {
+        cancelStreamRender();
         cleanupCursor();
         if (state.abortController?.signal?.aborted || err?.message === 'userStopped') {
             state.generating = false;
@@ -1118,26 +1129,28 @@ export async function runContinue(session, targetMsgId) {
             const bar = document.getElementById('scp-thinking-bar');
             if (bar) bar.style.display = 'flex';
         }
-        const combined = _joinContinuation(originalContent, text);
-        let tcIndex = 0;
-        const resC = extractToolCallPlaceholders(combined, tcIndex);
-        let procText = resC.text;
+        scheduleStreamRender(() => {
+            const combined = _joinContinuation(originalContent, text);
+            let tcIndex = 0;
+            const resC = extractToolCallPlaceholders(combined, tcIndex);
+            let procText = resC.text;
 
-        const { content: disp } = getDisplayContent(procText, settings);
-        if (streamContentEl) {
-            streamContentEl.innerHTML = renderMarkdown(disp);
-            streamContentEl.appendChild(cursorEl);
-            postProcessHTMLBlocks(streamContentEl);
+            const { content: disp } = getDisplayContent(procText, settings);
+            if (streamContentEl) {
+                streamContentEl.innerHTML = renderMarkdown(disp);
+                streamContentEl.appendChild(cursorEl);
+                postProcessHTMLBlocks(streamContentEl, true);
 
-            if (resC.nextIndex > 0) {
-                const liveTCs = parseToolCallsFromText(combined);
-                const displayed = liveTCs.map((tc, i) => targetMsg.toolCalls?.[i] || {
-                    id: `live_${i}`, name: tc.name, input: tc.input, status: 'done', result: undefined
-                });
-                postProcessToolCalls(targetEl, displayed);
+                if (resC.nextIndex > 0) {
+                    const liveTCs = parseToolCallsFromText(combined);
+                    const displayed = liveTCs.map((tc, i) => targetMsg.toolCalls?.[i] || {
+                        id: `live_${i}`, name: tc.name, input: tc.input, status: 'done', result: undefined
+                    });
+                    postProcessToolCalls(targetEl, displayed);
+                }
             }
-        }
-        smartScrollToBottom();
+            smartScrollToBottom();
+        });
     };
 
     const _applyFinalContinuation = (fullCombined) => {
@@ -1161,6 +1174,7 @@ export async function runContinue(session, targetMsgId) {
         });
 
         const result = await callGenerate(session, settings, CONTINUE_PROMPT, onChunk);
+        cancelStreamRender();
         cleanupCursor();
 
         if (result === null) {
@@ -1203,6 +1217,7 @@ export async function runContinue(session, targetMsgId) {
         _dbgAdd('CONTINUE_DONE', { chars: continuation?.length || 0, tokensOut });
 
     } catch (err) {
+        cancelStreamRender();
         cleanupCursor();
         if (state.abortController?.signal?.aborted || err?.message === 'userStopped') {
             state.generating = false;
